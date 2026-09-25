@@ -7,27 +7,43 @@
 'use strict';
 
 /* ------------------------------------------------------------
-   Supabase client (CDN global: window.supabase)
+   Supabase credentials — HARDCODED for browser-native execution.
+   No build step, no .env loader: Live Server reads these directly.
+
+   → Paste your Supabase "anon public" key below (one line):
+     Supabase Dashboard → Project Settings → API Keys
+     → anon public  (starts with "eyJ…" or "sb_publishable_…")
    ------------------------------------------------------------ */
-var supabaseClient = null;
+const SUPABASE_URL = "https://epikmapynijxwomhbydo.supabase.co";
+const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY_HERE";
+
+var supabase = null;
 (function initSupabase() {
   try {
-    var url = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '').trim();
-    var key = (typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : '').trim();
+    var url = String(SUPABASE_URL || '').trim();
+    var key = String(SUPABASE_ANON_KEY || '').trim();
     var hasValidUrl = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url);
     var keyMissing = !key || /^PASTE_/i.test(key);
-    if (hasValidUrl && !keyMissing && window.supabase && typeof window.supabase.createClient === 'function') {
-      supabaseClient = window.supabase.createClient(url, key, {
-        auth: { persistSession: false, autoRefreshToken: false },
-        realtime: { params: { eventsPerSecond: 5 } }
-      });
-    } else if (!keyMissing) {
-      console.warn('Juvia Pass: Supabase URL invalide ou SDK non chargé.');
-    } else {
-      console.warn('Juvia Pass: renseignez SUPABASE_ANON_KEY dans js/config.js pour activer la fidélité.');
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+      console.warn('Juvia Pass: SDK Supabase CDN non chargé.');
+      return;
     }
+    if (keyMissing) {
+      console.warn('Juvia Pass: SUPABASE_ANON_KEY est vide — collez votre clé anon en haut de js/app.js pour activer la fidélité.');
+      return;
+    }
+    if (!hasValidUrl) {
+      console.warn('Juvia Pass: SUPABASE_URL invalide.');
+      return;
+    }
+    supabase = window.supabase.createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: { params: { eventsPerSecond: 5 } }
+    });
+    console.info('Juvia Pass: Supabase connecté ✔');
   } catch (error) {
     console.warn('Juvia Pass: Supabase could not be initialized.', error);
+    supabase = null;
   }
 })();
 
@@ -176,7 +192,7 @@ function findClientByPhone(value, country) {
     candidates.push(spaced, '+212 ' + spaced);
   }
   var unique = candidates.filter(function (v, i) { return v && candidates.indexOf(v) === i; });
-  return supabaseClient.from('clients').select('*').in('phone', unique).limit(1)
+  return supabase.from('clients').select('*').in('phone', unique).limit(1)
     .then(function (res) { return { data: (res.data && res.data[0]) || null, error: res.error }; });
 }
 
@@ -185,15 +201,15 @@ var missingColumn = function (error) { return (error && error.code === 'PGRST204
 
 function insertClientProfile(firstName, lastName, phone, email) {
   var name = (firstName + ' ' + lastName).trim();
-  return supabaseClient.from('clients')
+  return supabase.from('clients')
     .insert({ first_name: firstName, last_name: lastName, name: name, phone: phone, email: email, points: 0 })
     .select().single();
 }
 function updatePointsBalance(id, balance) {
-  var result = supabaseClient.from('clients').update({ points: balance }).eq('id', id).select().single();
+  var result = supabase.from('clients').update({ points: balance }).eq('id', id).select().single();
   return result.then(function (res) {
     if (res.error && missingColumn(res.error)) {
-      return supabaseClient.from('clients').update({ points_balance: balance }).eq('id', id).select().single();
+      return supabase.from('clients').update({ points_balance: balance }).eq('id', id).select().single();
     }
     return res;
   });
@@ -202,7 +218,7 @@ function logLoyaltyTransaction(clientId, amount, earned) {
   var safeClientId = String(clientId == null ? '' : clientId).trim();
   var isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeClientId);
   if (!isUuid) return Promise.resolve({ error: new Error('UUID client invalide pour l’historique') });
-  return supabaseClient.from('transactions').insert({ client_id: safeClientId, amount_spent: parseFloat(amount), points_added: Number(earned) });
+  return supabase.from('transactions').insert({ client_id: safeClientId, amount_spent: parseFloat(amount), points_added: Number(earned) });
 }
 
 /* ------------------------------------------------------------
@@ -1160,8 +1176,8 @@ function openPass() {
 function closePass() {
   appState.passOpen = false;
   document.body.style.overflow = '';
-  if (appState.pass.channel && supabaseClient) {
-    try { supabaseClient.removeChannel(appState.pass.channel); } catch (e) {}
+  if (appState.pass.channel && supabase) {
+    try { supabase.removeChannel(appState.pass.channel); } catch (e) {}
     appState.pass.channel = null;
   }
   var host = document.getElementById('pass-root');
@@ -1169,11 +1185,11 @@ function closePass() {
 }
 
 function fetchPassClient(id) {
-  if (!supabaseClient || !id) return;
+  if (!supabase || !id) return;
   appState.pass.loading = true;
   appState.pass.error = '';
   renderPassModalBody();
-  supabaseClient.from('clients').select('*').eq('id', id).single()
+  supabase.from('clients').select('*').eq('id', id).single()
     .then(function (res) {
       if (res.error) throw res.error;
       appState.pass.client = res.data;
@@ -1193,9 +1209,9 @@ function fetchPassClient(id) {
 
 function subscribePassRealtime() {
   var clientId = appState.pass.client && appState.pass.client.id;
-  if (!supabaseClient || !clientId || appState.pass.channel) return;
+  if (!supabase || !clientId || appState.pass.channel) return;
   try {
-    appState.pass.channel = supabaseClient.channel('juvia-pass-' + clientId)
+    appState.pass.channel = supabase.channel('juvia-pass-' + clientId)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clients', filter: 'id=eq.' + clientId }, function (payload) {
         appState.pass.client = payload.new;
         renderPassModalBody();
@@ -1298,8 +1314,8 @@ function renderPassModalBody() {
       appState.pass.error = '';
       appState.pass.installHelp = false;
       appState.pass.form = { first_name: '', last_name: '', country: 'MA', phone: '', email: '' };
-      if (appState.pass.channel && supabaseClient) {
-        try { supabaseClient.removeChannel(appState.pass.channel); } catch (e) {}
+      if (appState.pass.channel && supabase) {
+        try { supabase.removeChannel(appState.pass.channel); } catch (e) {}
         appState.pass.channel = null;
       }
       renderPassModalBody();
@@ -1358,7 +1374,7 @@ function registerPass(event) {
   if (!firstName || !lastName || national.length < 4 || !/^\S+@\S+\.\S+$/.test(email)) {
     return setPassError('Veuillez compléter correctement tous les champs.');
   }
-  if (!supabaseClient) return setPassError('Le service fidélité est momentanément indisponible.');
+  if (!supabase) return setPassError('Le service fidélité est momentanément indisponible.');
   appState.pass.loading = true;
   appState.pass.error = '';
   var submitBtn = document.getElementById('pass-submit');
@@ -1391,7 +1407,7 @@ function recoverPassByPhone() {
   var f = appState.pass.form;
   var national = cleanNationalPhone(f.phone, f.country);
   if (national.length < 4) return setPassError('Saisissez votre numéro pour retrouver votre carte.');
-  if (!supabaseClient) return setPassError('Le service fidélité est momentanément indisponible.');
+  if (!supabase) return setPassError('Le service fidélité est momentanément indisponible.');
   appState.pass.loading = true;
   appState.pass.error = '';
   var recoverBtn = document.getElementById('pass-recover');
@@ -1580,8 +1596,8 @@ function unlockStaff(event) {
   renderStaffView();
   (async function () {
     try {
-      if (!supabaseClient) throw new Error('Service indisponible');
-      var res = await supabaseClient.from('staff_pins').select('*').eq('pin_code', st.pin.trim()).limit(1);
+      if (!supabase) throw new Error('Service indisponible');
+      var res = await supabase.from('staff_pins').select('*').eq('pin_code', st.pin.trim()).limit(1);
       if (res.error) throw res.error;
       if (res.data && res.data.length) {
         safeStorage.set('sessionStorage', STAFF_SESSION_KEY, '1');
@@ -1612,8 +1628,8 @@ function findClientByStaff(rawId) {
   if (goBtn) { goBtn.disabled = true; goBtn.innerHTML = ic('loader-circle', 17); refreshIcons(); }
   (async function () {
     try {
-      if (!supabaseClient) throw new Error('Supabase non configuré');
-      var res = await supabaseClient.from('clients').select('*').eq('id', id).single();
+      if (!supabase) throw new Error('Supabase non configuré');
+      var res = await supabase.from('clients').select('*').eq('id', id).single();
       if (res.error) throw res.error;
       st.profile = res.data;
       st.scanning = false;
