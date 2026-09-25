@@ -1,0 +1,13 @@
+{
+  "name": "Juvia Pass",
+  "short_name": "Juvia Pass",
+  "description": "Votre carte fidélité Juvia, toujours avec vous.",
+  "start_url": "/?pass=open",
+  "display": "standalone",
+  "background_color": "#f9f6ef",
+  "theme_color": "#17302f",
+  "orientation": "portrait",
+  "icons": [
+    {"src":"/juvia-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
