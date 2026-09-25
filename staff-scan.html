@@ -10,8 +10,8 @@
   <link rel="manifest" href="/manifest.webmanifest"/>
   <link rel="icon" href="/juvia-icon.svg"/>
   <link rel="apple-touch-icon" href="/juvia-icon.svg"/>
-  <meta name="description" content="La carte digitale de Juvia Café & Restaurant — découvrez nos plats, boissons et douceurs."/>
-  <title>À table — Menu Juvia</title>
+  <meta name="description" content="Espace équipe Juvia — scanner fidélité."/>
+  <title>Espace Staff — Juvia</title>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,12 +24,6 @@
   <!-- Lucide icons via CDN -->
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.js"></script>
 
-  <!-- libphonenumber-js via CDN (dynamic country codes) -->
-  <script src="https://cdn.jsdelivr.net/npm/libphonenumber-js@1.13.14/bundle/libphonenumber-js.min.js"></script>
-
-  <!-- QR code generator via CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
-
   <!-- Canvas Confetti via CDN -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
 
@@ -39,17 +33,11 @@
 <body>
   <div id="app"></div>
 
+  <!-- HTML5 QRCode Scanner -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/dist/html5-qrcode.min.js"></script>
+
   <!-- App -->
   <script src="js/config.js"></script>
   <script src="js/app.js"></script>
-
-  <!-- Service Worker Registration -->
-  <script>
-    if ('serviceWorker' in navigator && /^https?:/.test(window.location.protocol)) {
-      navigator.serviceWorker.register('/sw.js').catch(function (error) {
-        console.warn('Service worker registration failed:', error);
-      });
-    }
-  </script>
 </body>
 </html>
