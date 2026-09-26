@@ -588,7 +588,13 @@ var appState = {
     revealed: false,
     timers: []
   },
-  staff: { authenticated: false, pin: '', pinError: '', scanning: false, profile: null, amount: '', status: { type: '', text: '' }, loading: false, manualId: '', scanner: null }
+  staff: {
+    authenticated: false, pin: '', pinError: '', profile: null, amount: '',
+    status: { type: '', text: '' }, loading: false, manualId: '',
+    scanner: null, scannerRunning: false, starting: false, processingRead: false,
+    lastScanAt: 0, fallbackStream: null, autoStartCam: false,
+    camState: 'off', camError: null, readerSeq: 0, readerId: ''
+  }
 };
 
 var app = document.getElementById('app');
@@ -1460,9 +1466,304 @@ function setStaffStatus(type, text) {
   refreshIcons();
 }
 
+/* ------------------------------------------------------------
+   Staff scanner — robust camera pipeline
+   ------------------------------------------------------------
+   1. Gate on a secure context + WebRTC support BEFORE touching
+      the QR engine: getUserMedia only exists on HTTPS (Vercel)
+      and on http://localhost / 127.0.0.1 (Live Server).
+   2. Pre-flight getUserMedia() so permission errors surface with
+      a precise, human message instead of "indisponible".
+   3. Hand the session to Html5Qrcode, which injects its <video>
+      into our own styled square container (video fills it fully).
+   4. Fallback: if the decoding library failed to load (CDN
+      blocked / offline), still show the raw live feed and point
+      the user at the manual UUID entry.
+   ------------------------------------------------------------ */
+
+/* Every scanner render gets a UNIQUE reader id: a stale Html5Qrcode
+   instance's async stop()→clear() looks its element up by id, and an
+   id reuse would let it wipe the fresh session's <video> node. */
+var SCANNER_HOST_PREFIX = 'staff-qr-reader';
+
+function delay(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+function staffIsSecureContext() {
+  var secure = false;
+  try { secure = !!window.isSecureContext; } catch (e) {}
+  if (!secure) {
+    var host = String(window.location.hostname || '');
+    secure = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '';
+  }
+  return secure;
+}
+
+function staffCameraApiAvailable() {
+  return !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
+}
+
+function describeCameraError(err) {
+  var name = String((err && err.name) || err || '').toLowerCase().replace(/[^a-z]/g, '');
+  var message = String((err && err.message) || '').toLowerCase();
+  var blob = name + '|' + message;
+  if (name === 'insecurecontexterror' || blob.indexOf('secure') !== -1 || blob.indexOf('https') !== -1) {
+    return {
+      title: 'Connexion non sécurisée',
+      text: 'La caméra exige un contexte sécurisé (WebRTC) : ouvrez cette page en HTTPS (lien Vercel) ou sur http://localhost avec Live Server, puis réessayez.'
+    };
+  }
+  if (name === 'unsupportedapierror') {
+    return {
+      title: 'Caméra non prise en charge',
+      text: 'Ce navigateur n’expose pas l’API caméra (getUserMedia). Mettez-le à jour ou réessayez avec Chrome, Safari ou Firefox récent.'
+    };
+  }
+  if (name === 'permissiondeniederror' || blob.indexOf('notallowed') !== -1 || blob.indexOf('permission') !== -1) {
+    return {
+      title: 'Permission caméra refusée',
+      text: 'Touchez l’icône cadenas / caméra dans la barre d’adresse, autorisez la caméra pour ce site, puis « Réessayer ». La saisie manuelle reste disponible ci-dessous.'
+    };
+  }
+  if (blob.indexOf('notreadable') !== -1 || name === 'trackstarterror' ||
+      blob.indexOf('in use') !== -1 || blob.indexOf('could not start') !== -1 || blob.indexOf('monopolis') !== -1) {
+    return {
+      title: 'Caméra déjà utilisée',
+      text: 'Une autre application ou un autre onglet monopolise la caméra. Fermez-les, puis touchez « Réessayer ».'
+    };
+  }
+  if (blob.indexOf('notfound') !== -1 || blob.indexOf('not found') !== -1 || blob.indexOf('overconstrained') !== -1 || blob.indexOf('no camera') !== -1) {
+    return {
+      title: 'Aucune caméra détectée',
+      text: 'Aucune caméra exploitable n’a été trouvée sur cet appareil. Utilisez la saisie manuelle ci-dessous.'
+    };
+  }
+  return {
+    title: 'Erreur caméra',
+    text: (err && err.message) || 'Une erreur inattendue est survenue avec la caméra. Réessayez ou utilisez la saisie manuelle ci-dessous.'
+  };
+}
+
+function stopMediaStreamTracks(stream) {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach(function (track) { try { track.stop(); } catch (e) {} });
+  } catch (e) {}
+}
+
+function stopStaffFallbackStream() {
+  var st = appState.staff;
+  if (st.fallbackStream) {
+    stopMediaStreamTracks(st.fallbackStream);
+    st.fallbackStream = null;
+  }
+  var host = st.readerId ? document.getElementById(st.readerId) : null;
+  if (host) {
+    var video = host.querySelector('video');
+    if (video && video.srcObject) { try { video.srcObject = null; } catch (e) {} }
+  }
+}
+
 function destroyStaffScanner() {
-  var s = appState.staff.scanner;
-  if (s) { try { s.clear().catch(function () {}); } catch (e) {} appState.staff.scanner = null; }
+  var st = appState.staff;
+  var scanner = st.scanner;
+  st.scanner = null;
+  if (scanner) {
+    try {
+      if (st.scannerRunning && typeof scanner.stop === 'function') {
+        st.scannerRunning = false;
+        // html5-qrcode: stop() MUST resolve before clear() is called.
+        Promise.resolve(scanner.stop()).catch(function () {}).then(function () {
+          try { scanner.clear(); } catch (e) {}
+        });
+      } else {
+        try { scanner.clear(); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+  st.scannerRunning = false;
+  stopStaffFallbackStream();
+}
+
+/* Pre-flight: prove the permission + a real camera BEFORE the QR
+   engine starts, so failure reasons are never generic. */
+function staffCameraPreflight() {
+  if (!staffIsSecureContext()) return Promise.reject({ name: 'InsecureContextError' });
+  if (!staffCameraApiAvailable()) return Promise.reject({ name: 'UnsupportedApiError' });
+  return navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' } } })
+    .catch(function (err) {
+      var name = String((err && err.name) || '');
+      if (name === 'OverconstrainedError' || name === 'NotFoundError') {
+        // Many desktops only expose a generic webcam — retry leniently.
+        return navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      }
+      throw err;
+    });
+}
+
+/* Build an ordered list of camera constraints to try. Prefer a
+   detected back camera, then generic facingMode fallbacks.
+   (html5-qrcode only accepts facingMode: "user"|"environment"
+   or deviceId — no "ideal" objects.) */
+function pickScannerCameraCandidates() {
+  var fallbacks = [
+    { facingMode: 'environment' },
+    { facingMode: 'user' }
+  ];
+  try {
+    if (!window.Html5Qrcode || typeof window.Html5Qrcode.getCameras !== 'function') return Promise.resolve(fallbacks);
+    return window.Html5Qrcode.getCameras().then(function (cameras) {
+      if (!cameras || !cameras.length) return fallbacks;
+      var seen = {};
+      var ordered = cameras.filter(function (cam) { return /back|rear|arri[eè]re|environment|wide|traseira|trasera/i.test(String(cam && (cam.label || cam.id))); })
+        .concat(cameras)
+        .filter(function (cam) {
+          var id = String(cam && cam.id);
+          if (!id || seen[id]) return false;
+          seen[id] = true;
+          return true;
+        });
+      return ordered.map(function (cam) { return { deviceId: { exact: String(cam.id) } }; }).concat(fallbacks);
+    }).catch(function () { return fallbacks; });
+  } catch (e) {
+    return Promise.resolve(fallbacks);
+  }
+}
+
+function tryScannerStart(scanner, candidates, index, lastErr) {
+  if (index >= candidates.length) return Promise.reject(lastErr || { name: 'NotFoundError' });
+  // No aspectRatio override: the container is already square and the
+  // cover-fit CSS handles framing — fewer applyConstraints failures.
+  var config = {
+    fps: 10,
+    qrbox: function (w, h) {
+      var edge = Math.max(180, Math.floor(Math.min(w, h) * 0.7));
+      return { width: edge, height: edge };
+    },
+    disableFlip: false
+  };
+  return scanner.start(candidates[index], config, onStaffScanSuccess, function () {}).catch(function (err) {
+    var name = String((err && err.name) || err || '').toLowerCase().replace(/[^a-z]/g, '');
+    // Permission / busy / insecure errors are fatal — retrying cannot fix them.
+    if (name.indexOf('notallowed') !== -1 || name.indexOf('notreadable') !== -1 ||
+        name.indexOf('security') !== -1 || name.indexOf('abort') !== -1) throw err;
+    return tryScannerStart(scanner, candidates, index + 1, err);
+  });
+}
+
+function onStaffScanSuccess(decodedText) {
+  var st = appState.staff;
+  if (st.camState !== 'live' || st.processingRead) return;
+  var now = Date.now();
+  if (now - st.lastScanAt < 1500) return; // html5-qrcode decodes continuously
+  st.lastScanAt = now;
+  st.processingRead = true;
+  safeVibrate(50);
+  arcadeAudio.tick(940);
+  destroyStaffScanner();
+  st.camState = 'processing';
+  renderScannerSlot();
+  // The Juvia Pass QR carries the member UUID — hand it to Supabase.
+  findClientByStaff(decodedText, 'scan');
+}
+
+function startStaffScanner() {
+  var st = appState.staff;
+  if (st.starting) return; // guard double-taps
+  st.starting = true;
+  st.processingRead = false;
+  destroyStaffScanner();
+  st.camState = 'starting';
+  st.camError = null;
+  renderScannerSlot();
+
+  staffCameraPreflight()
+    .then(function (preStream) {
+      // Decoding library missing → graceful fallback: show the raw feed.
+      if (typeof window.Html5Qrcode !== 'function') {
+        st.fallbackStream = preStream;
+        return 'fallback';
+      }
+      // Free the device so the QR engine can reopen it without contention.
+      stopMediaStreamTracks(preStream);
+      return delay(150).then(function () {
+        var scanner = new window.Html5Qrcode(st.readerId, false);
+        st.scanner = scanner;
+        return pickScannerCameraCandidates().then(function (candidates) {
+          return tryScannerStart(scanner, candidates, 0);
+        }).then(function () {
+          st.scannerRunning = true;
+          return 'live';
+        });
+      });
+    })
+    .then(function (mode) {
+      st.starting = false;
+      st.camState = mode; // 'live' | 'fallback'
+      revealScannerLiveUI(mode);
+      if (mode === 'fallback') attachStaffFallbackStream();
+    })
+    .catch(function (err) {
+      console.error('Juvia staff camera:', err);
+      st.starting = false;
+      st.camState = 'error';
+      st.camError = describeCameraError(err);
+      destroyStaffScanner();
+      renderScannerSlot();
+    });
+}
+
+function stopStaffCameraSession() {
+  var st = appState.staff;
+  destroyStaffScanner();
+  st.starting = false;
+  st.processingRead = false;
+  st.camState = 'off';
+  st.camError = null;
+  renderScannerSlot();
+}
+
+/* Patch the already-rendered shell when the camera goes live, WITHOUT
+   rebuilding #staff-qr-reader (the engine holds a reference to it). */
+function revealScannerLiveUI(mode) {
+  var slot = document.getElementById('staff-scan-slot');
+  if (!slot) return;
+  var stage = slot.querySelector('.scan-stage');
+  if (stage) stage.classList.add('is-live');
+  var cover = slot.querySelector('.scan-cover');
+  if (cover) cover.remove();
+  var overlay = slot.querySelector('.scan-overlay');
+  if (overlay) overlay.removeAttribute('hidden');
+  var actions = slot.querySelector('.scanner-actions');
+  if (actions) {
+    actions.innerHTML =
+      '<button class="scan-ghost" id="staff-stop-cam" type="button">' + ic('camera-off', 13) + ' Fermer la caméra</button>' +
+      (mode === 'fallback'
+        ? '<p class="scan-note warn">Lecture QR automatique indisponible — utilisez la saisie manuelle ci-dessous.</p>'
+        : '<p class="scan-note">Le flux n’est jamais enregistré · décodage 100% sur l’appareil.</p>');
+    refreshIcons();
+    document.getElementById('staff-stop-cam').addEventListener('click', stopStaffCameraSession);
+  }
+}
+
+function attachStaffFallbackStream() {
+  var st = appState.staff;
+  var host = st.readerId ? document.getElementById(st.readerId) : null;
+  if (!host || !st.fallbackStream) return;
+  host.innerHTML = '';
+  var video = document.createElement('video');
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  host.appendChild(video);
+  video.srcObject = st.fallbackStream;
+  try {
+    var playing = video.play();
+    if (playing && typeof playing.catch === 'function') playing.catch(function () {});
+  } catch (e) {}
 }
 
 function renderStaffPage() {
@@ -1517,6 +1818,9 @@ function renderStaffView() {
     '</main>';
   refreshIcons();
   document.getElementById('staff-lock-btn').addEventListener('click', function () {
+    destroyStaffScanner();
+    appState.staff.camState = 'off';
+    appState.staff.camError = null;
     safeStorage.remove('sessionStorage', STAFF_SESSION_KEY);
     appState.staff.authenticated = false;
     appState.staff.profile = null;
@@ -1532,13 +1836,28 @@ function renderStaffScanView() {
   host.innerHTML =
     '<div class="staff-intro"><span>' + ic('camera', 20) + '</span>' +
       '<div><h1>Scanner un pass</h1><p>Cadrez le QR code du client.</p></div></div>' +
-    '<div id="staff-scan-slot"></div>' +
-    '<div class="manual-divider"><span>ou saisir l’identifiant</span></div>' +
-    '<form class="manual-client" id="staff-manual-form">' +
-      '<input id="staff-manual-input" value="' + esc(appState.staff.manualId) + '" placeholder="UUID du client"/>' +
-      '<button type="submit" id="staff-manual-btn">' + ic('chevron-right', 17) + '</button>' +
-    '</form>' +
-    '<div id="staff-status-slot"></div>';
+    // Two-column layout on desktop (grid), stacked single column on mobile.
+    '<div class="staff-grid">' +
+      '<div class="staff-grid-main"><div id="staff-scan-slot"></div></div>' +
+      '<aside class="staff-grid-side staff-side-card">' +
+        '<div class="staff-side-head">' +
+          '<span>Sans caméra ?</span>' +
+          '<h2>Saisie manuelle</h2>' +
+          '<p>Collez l’identifiant UUID du membre si le scan est impossible.</p>' +
+        '</div>' +
+        '<div class="manual-divider"><span>ou saisir l’identifiant</span></div>' +
+        '<form class="manual-client" id="staff-manual-form">' +
+          '<input id="staff-manual-input" value="' + esc(appState.staff.manualId) + '" placeholder="UUID du client"/>' +
+          '<button type="submit" id="staff-manual-btn">' + ic('chevron-right', 17) + '</button>' +
+        '</form>' +
+        '<ul class="staff-tips">' +
+          '<li>' + ic('scan-line', 12) + ' Cadrez le QR code dans le carré doré</li>' +
+          '<li>' + ic('zap', 12) + ' 1 point gagné par tranche de 10 DH dépensés</li>' +
+          '<li>' + ic('shield-check', 12) + ' Aucun enregistrement — décodage 100% local</li>' +
+        '</ul>' +
+        '<div id="staff-status-slot"></div>' +
+      '</aside>' +
+    '</div>';
   refreshIcons();
   renderScannerSlot();
   setStaffStatus(appState.staff.status.type, appState.staff.status.text);
@@ -1546,45 +1865,81 @@ function renderStaffScanView() {
   manualInput.addEventListener('input', function () { appState.staff.manualId = manualInput.value; });
   document.getElementById('staff-manual-form').addEventListener('submit', function (e) {
     e.preventDefault();
-    findClientByStaff(appState.staff.manualId);
+    findClientByStaff(appState.staff.manualId, 'manual');
   });
+  // "Scanner un autre pass" restarts the camera straight away.
+  if (appState.staff.autoStartCam) {
+    appState.staff.autoStartCam = false;
+    startStaffScanner();
+  }
 }
 
 function renderScannerSlot() {
   var slot = document.getElementById('staff-scan-slot');
   if (!slot) return;
   var st = appState.staff;
-  if (!st.scanning) {
-    slot.innerHTML = '<button class="start-camera" id="staff-start-cam">' + ic('qr-code', 42) + ' Ouvrir la caméra</button>';
-    refreshIcons();
-    document.getElementById('staff-start-cam').addEventListener('click', function () {
-      st.scanning = true;
-      renderScannerSlot();
-    });
-  } else {
-    slot.innerHTML =
-      '<div class="scanner-shell"><div id="staff-qr-reader"></div>' +
-        '<button id="staff-stop-cam">Fermer la caméra</button></div>';
-    document.getElementById('staff-stop-cam').addEventListener('click', function () {
-      st.scanning = false;
-      destroyStaffScanner();
-      renderScannerSlot();
-    });
-    try {
-      var scanner = new Html5QrcodeScanner('staff-qr-reader', {
-        fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1, rememberLastUsedCamera: true
-      }, false);
-      st.scanner = scanner;
-      scanner.render(function (decoded) {
-        findClientByStaff(decoded);
-        try { scanner.clear().catch(function () {}); } catch (e) {}
-        st.scanner = null;
-      }, function () {});
-    } catch (error) {
-      console.error('Scanner loading:', error);
-      setStaffStatus('error', 'Caméra indisponible. Utilisez la saisie manuelle.');
-    }
+  // A full rebuild always tears down any camera session first, so the
+  // html5-qrcode <video> node is never orphaned above the new markup.
+  destroyStaffScanner();
+  st.readerId = SCANNER_HOST_PREFIX + '-' + (++st.readerSeq);
+  var state = st.camState;
+  var cover = '';
+
+  if (state === 'off') {
+    cover =
+      '<div class="scan-cover">' +
+        '<span class="scan-idle-icon">' + ic('qr-code', 30) + '</span>' +
+        '<h3>Scanner prêt</h3>' +
+        '<p>Autorisez l’accès à la caméra pour lire le QR code du Juvia Pass client.</p>' +
+        '<button class="scan-primary" id="staff-start-cam" type="button">' + ic('camera', 15) + ' Activer la caméra</button>' +
+        (staffIsSecureContext() ? '' :
+          '<small class="scan-cover-warn">' + ic('triangle-alert', 11) + ' Hors HTTPS / localhost, le navigateur bloquera la caméra.</small>') +
+      '</div>';
+  } else if (state === 'starting') {
+    cover =
+      '<div class="scan-cover">' +
+        '<span class="scan-loader"></span>' +
+        '<h3>Activation de la caméra…</h3>' +
+        '<p>Validez la demande d’autorisation affichée par votre navigateur.</p>' +
+      '</div>';
+  } else if (state === 'processing') {
+    cover =
+      '<div class="scan-cover">' +
+        '<span class="scan-loader"></span>' +
+        '<h3>Lecture du pass…</h3>' +
+        '<p>Vérification du membre auprès du Juvia Pass.</p>' +
+      '</div>';
+  } else if (state === 'error') {
+    var camError = st.camError || { title: 'Erreur caméra', text: 'Réessayez ou utilisez la saisie manuelle ci-dessous.' };
+    cover =
+      '<div class="scan-cover">' +
+        '<span class="scan-error-icon">' + ic('camera-off', 26) + '</span>' +
+        '<h3>' + esc(camError.title) + '</h3>' +
+        '<p>' + esc(camError.text) + '</p>' +
+        '<button class="scan-primary" id="staff-retry-cam" type="button">' + ic('rotate-ccw', 14) + ' Réessayer</button>' +
+      '</div>';
   }
+
+  slot.innerHTML =
+    '<div class="scanner-shell">' +
+      '<div class="scan-stage">' +
+        '<div class="scan-reader" id="' + st.readerId + '"></div>' +
+        '<div class="scan-overlay" hidden>' +
+          '<i class="scan-corner tl"></i><i class="scan-corner tr"></i>' +
+          '<i class="scan-corner bl"></i><i class="scan-corner br"></i>' +
+          '<i class="scan-laser"></i>' +
+          '<span class="scan-hint">' + ic('scan-line', 12) + ' Alignez le QR code du pass</span>' +
+        '</div>' +
+        cover +
+      '</div>' +
+      '<div class="scanner-actions"></div>' +
+    '</div>';
+  refreshIcons();
+
+  var startBtn = document.getElementById('staff-start-cam');
+  if (startBtn) startBtn.addEventListener('click', startStaffScanner);
+  var retryBtn = document.getElementById('staff-retry-cam');
+  if (retryBtn) retryBtn.addEventListener('click', startStaffScanner);
 }
 
 function unlockStaff(event) {
@@ -1618,8 +1973,9 @@ function unlockStaff(event) {
   })();
 }
 
-function findClientByStaff(rawId) {
-  var id = String(rawId || '').trim().replace(/^juvia:/i, '');
+function findClientByStaff(rawId, source) {
+  // QR content is the member UUID (optionally "juvia:<uuid>") — sanitize it.
+  var id = String(rawId || '').trim().replace(/\s+/g, '').replace(/^juvia:/i, '');
   if (!id) return;
   var st = appState.staff;
   st.loading = true;
@@ -1632,14 +1988,28 @@ function findClientByStaff(rawId) {
       var res = await supabase.from('clients').select('*').eq('id', id).single();
       if (res.error) throw res.error;
       st.profile = res.data;
-      st.scanning = false;
+      st.camState = 'off';
+      st.camError = null;
+      st.processingRead = false;
       destroyStaffScanner();
       safeVibrate(60);
       renderStaffProfileView();
     } catch (error) {
       console.error('Staff client lookup:', error);
       st.profile = null;
-      setStaffStatus('error', 'Client introuvable. Vérifiez le QR code.');
+      if (source === 'scan') {
+        // The QR decoded fine, but Supabase matched no member:
+        // surface it as a scan-square state with an explicit retry.
+        st.processingRead = false;
+        st.camState = 'error';
+        st.camError = {
+          title: 'Pass introuvable',
+          text: 'Le QR code a bien été lu, mais aucun Juvia Pass ne correspond à cet identifiant. Vérifiez le pass du client, puis relancez un scan.'
+        };
+        renderScannerSlot();
+      } else {
+        setStaffStatus('error', 'Client introuvable. Vérifiez l’identifiant saisi.');
+      }
       var btn2 = document.getElementById('staff-manual-btn');
       if (btn2) { btn2.disabled = false; btn2.innerHTML = ic('chevron-right', 17); refreshIcons(); }
     } finally {
@@ -1656,22 +2026,32 @@ function renderStaffProfileView() {
   var bill = parseBillAmount(amount);
   var points = Math.floor((bill || 0) / 10);
   host.innerHTML =
-    '<div class="client-found">' +
-      '<div class="client-avatar">' + esc(clientName(profile).charAt(0).toUpperCase()) + '</div>' +
-      '<span>PASS IDENTIFIÉ</span>' +
-      '<h1>' + esc(clientName(profile)) + '</h1>' +
-      '<small>N° ' + esc(String(profile.id).slice(0, 8).toUpperCase()) + '</small>' +
-      '<div class="staff-balance"><b>' + clientPoints(profile) + '</b><span>points disponibles</span></div>' +
-    '</div>' +
-    '<form class="bill-form" id="staff-bill-form">' +
-      '<label>Montant de l’addition</label>' +
-      '<div>' + ic('receipt-text', 18) +
-        '<input id="staff-bill-input" type="number" min="1" step="any" value="' + esc(amount) + '" inputmode="decimal" placeholder="0.00"/><span>DH</span></div>' +
-      '<p>Le client gagne <b id="staff-points-preview">' + points + ' point(s)</b> · 10 DH = 1 point</p>' +
-      '<button type="submit" id="staff-bill-submit">' + ic('plus', 16) + ' Créditer les points</button>' +
-    '</form>' +
-    '<button class="scan-another" id="staff-scan-another">' + ic('qr-code', 14) + ' Scanner un autre pass</button>' +
-    '<div id="staff-status-slot"></div>';
+    // Two-column layout on desktop: member card left, billing side-card right.
+    '<div class="staff-grid">' +
+      '<div class="staff-grid-main"><div class="client-found">' +
+        '<div class="client-avatar">' + esc(clientName(profile).charAt(0).toUpperCase()) + '</div>' +
+        '<span>PASS IDENTIFIÉ</span>' +
+        '<h1>' + esc(clientName(profile)) + '</h1>' +
+        '<small>N° ' + esc(String(profile.id).slice(0, 8).toUpperCase()) + '</small>' +
+        '<div class="staff-balance"><b>' + clientPoints(profile) + '</b><span>points disponibles</span></div>' +
+      '</div></div>' +
+      '<aside class="staff-grid-side staff-side-card">' +
+        '<div class="staff-side-head">' +
+          '<span>Transaction fidélité</span>' +
+          '<h2>Créditer la visite</h2>' +
+          '<p>Saisissez le montant de l’addition pour créditer les points.</p>' +
+        '</div>' +
+        '<form class="bill-form" id="staff-bill-form">' +
+          '<label>Montant de l’addition</label>' +
+          '<div>' + ic('receipt-text', 18) +
+            '<input id="staff-bill-input" type="number" min="1" step="any" value="' + esc(amount) + '" inputmode="decimal" placeholder="0.00"/><span>DH</span></div>' +
+          '<p>Le client gagne <b id="staff-points-preview">' + points + ' point(s)</b> · 10 DH = 1 point</p>' +
+          '<button type="submit" id="staff-bill-submit">' + ic('plus', 16) + ' Créditer les points</button>' +
+        '</form>' +
+        '<button class="scan-another" id="staff-scan-another">' + ic('qr-code', 14) + ' Scanner un autre pass</button>' +
+        '<div id="staff-status-slot"></div>' +
+      '</aside>' +
+    '</div>';
   refreshIcons();
   var input = document.getElementById('staff-bill-input');
   input.addEventListener('input', function () {
@@ -1686,7 +2066,9 @@ function renderStaffProfileView() {
     appState.staff.profile = null;
     appState.staff.amount = '';
     appState.staff.manualId = '';
-    appState.staff.scanning = true;
+    appState.staff.camState = 'off';
+    appState.staff.camError = null;
+    appState.staff.autoStartCam = true;
     setStaffStatus('', '');
     renderStaffView();
   });
@@ -1760,6 +2142,26 @@ function showErrorFallback() {
 window.addEventListener('beforeinstallprompt', function (event) {
   event.preventDefault();
   appState.installPrompt = event;
+});
+
+// If the QR engine arrives late via the CDN failover and the camera is
+// only showing the raw fallback feed, upgrade to real decoding.
+document.addEventListener('juvia:qrlib', function () {
+  try {
+    if (isStaffRoute && appState.staff.camState === 'fallback') startStaffScanner();
+  } catch (e) {}
+});
+
+// Always release the camera when leaving or hiding the staff page.
+window.addEventListener('pagehide', destroyStaffScanner);
+window.addEventListener('beforeunload', destroyStaffScanner);
+document.addEventListener('visibilitychange', function () {
+  try {
+    if (document.visibilityState === 'hidden' &&
+        (appState.staff.scannerRunning || appState.staff.fallbackStream)) {
+      stopStaffCameraSession();
+    }
+  } catch (e) {}
 });
 
 try {

@@ -19,6 +19,15 @@ no `.env` file or environment loader is needed in the browser.
 | Customer menu + Juvia Pass | `index.html` |
 | Staff loyalty scanner | `staff-scan.html` |
 
+### Staff scanner — camera requirements
+
+Camera access (`getUserMedia`/WebRTC) is only allowed by browsers in a
+**secure context**: open the staff page over **HTTPS** (Vercel deployment)
+or via **`http://localhost` / `http://127.0.0.1`** with Live Server.
+On any other origin (e.g. a LAN IP like `http://192.168.x.x`) the browser
+blocks the camera — the scanner detects this and explains it on screen,
+and the manual UUID entry always remains available as a fallback.
+
 ## Structure
 
 ```
