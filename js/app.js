@@ -758,13 +758,32 @@ function setActiveCategory(id) {
 /* ------------------------------------------------------------
    Video modal
    ------------------------------------------------------------ */
+// Closes and tears down the video modal. Deliberately defensive: every step
+// is guarded so a media/detached-node error can never leave the modal stuck
+// open again (the previous inline close() threw on an undefined variable and
+// aborted before removing the modal).
+function closeVideoModal() {
+  var modal = document.getElementById('video-modal');
+  if (modal) {
+    var video = modal.querySelector('video');
+    if (video) {
+      try { video.pause(); } catch (e) { /* Already detached. */ }
+      try { video.currentTime = 0; } catch (e) { /* Detached or unloaded media. */ }
+    }
+    modal.classList.remove('open', 'is-entering');
+  }
+  document.body.style.overflow = ''; // Restore page scrolling
+  var host = document.getElementById('video-root');
+  if (host) host.innerHTML = '';
+}
+
 function openVideoModal(dish) {
   var host = document.getElementById('video-root');
   if (!host) return;
   // is-entering keeps the slide-up reveal paused until playback has been
   // requested, so play() always wins the tap on iOS Safari.
   host.innerHTML =
-    '<div class="video-modal is-entering" role="dialog" aria-modal="true" aria-label="Vidéo de ' + esc(dish.n) + '">' +
+    '<div class="video-modal open is-entering" id="video-modal" role="dialog" aria-modal="true" aria-label="Vidéo de ' + esc(dish.n) + '">' +
       '<button type="button" class="modal-bg" id="video-bg" aria-label="Fermer la vidéo"></button>' +
       '<div class="modal-card">' +
         '<button type="button" class="modal-close" id="video-close" aria-label="Fermer la vidéo">' + ic('x', 18) + '</button>' +
@@ -826,15 +845,39 @@ function openVideoModal(dish) {
   }
   refreshIcons();
 
-  function close() {
-    if (video) {
-      try { video.pause(); } catch (e) {}
-      try { video.currentTime = 0; } catch (e) { /* Detached or unloaded media. */ }
-    }
-    host.innerHTML = '';
+  // Lock page scrolling while the modal is up (closeVideoModal restores it).
+  document.body.style.overflow = 'hidden';
+
+  // Event listeners for close button, backdrop and overlay — click AND
+  // touchend so taps close instantly on mobile instead of relying on the
+  // synthetic click, which native video controls can swallow.
+  var closeBtn = document.getElementById('video-close');
+  var backdropBtn = document.getElementById('video-bg');
+  var modalOverlay = document.getElementById('video-modal');
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeVideoModal);
+    closeBtn.addEventListener('touchend', function (e) {
+      e.preventDefault(); // Suppress the synthetic click to avoid double-fire.
+      closeVideoModal();
+    });
   }
-  document.getElementById('video-bg').addEventListener('click', close);
-  document.getElementById('video-close').addEventListener('click', close);
+
+  // The dedicated backdrop button covers all "outside empty space".
+  if (backdropBtn) {
+    backdropBtn.addEventListener('click', closeVideoModal);
+    backdropBtn.addEventListener('touchend', function (e) {
+      e.preventDefault();
+      closeVideoModal();
+    });
+  }
+
+  // Safety net for taps that land on the overlay itself (e.g. grid gaps).
+  if (modalOverlay) {
+    modalOverlay.addEventListener('click', function (e) {
+      if (e.target === modalOverlay) closeVideoModal();
+    });
+  }
 }
 
 /* ------------------------------------------------------------

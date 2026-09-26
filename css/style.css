@@ -253,3 +253,9 @@
    still carries .is-entering, then drops that class on the next frame. Pausing
    the slide-up here means the animation can only begin after play() returned. */
 .video-modal.is-entering .modal-card{animation-play-state:paused}
+
+/* Critical fix — modal close button must stay tappable:
+   the open modal's video, its native controls and the backdrop must never
+   layer above the X, and taps must register immediately on mobile. */
+.modal-close{z-index:9999!important;cursor:pointer!important;pointer-events:auto!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.modal-bg{cursor:pointer;touch-action:manipulation}
