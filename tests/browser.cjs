@@ -2,8 +2,14 @@
 const { chromium } = require("playwright");
 const QRCode = require("qrcode");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 (async () => {
   const baseURL = process.env.BASE_URL || "http://localhost:8000";
+  const appSource = fs.readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8");
+  const indexSource = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  assert.doesNotMatch(appSource, /html2canvas|pass-download|downloadPassImage|Télécharger mon Pass/);
+  assert.doesNotMatch(indexSource, /html2canvas/);
   const browser = await chromium.launch({
     executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined,
     headless: true,
@@ -115,6 +121,79 @@ const assert = require("node:assert/strict");
     }
     console.log("layout", width, menu, staff);
   }
+  // Mobile menu regression: one tap anywhere on a video card opens its modal
+  // and requests playback while the tap is still a trusted user gesture.
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.goto(baseURL + "/index.html");
+  await p.waitForSelector(".video-card");
+  await p.evaluate(() => {
+    window.videoPlayCalls = 0;
+    window.nativeVideoPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      window.videoPlayCalls += 1;
+      return Promise.resolve();
+    };
+  });
+  await p.locator(".video-card").first().click({ position: { x: 8, y: 8 } });
+  await p.waitForSelector(".modal-video");
+  const mobileVideo = await p.locator(".modal-video").evaluate((video) => ({
+    autoplay: video.hasAttribute("autoplay") && video.autoplay,
+    playsinline: video.hasAttribute("playsinline") && video.playsInline,
+    muted: video.hasAttribute("muted") && video.muted,
+    loop: video.hasAttribute("loop") && video.loop,
+    playCalls: window.videoPlayCalls,
+    thumbnailPointerEvents: getComputedStyle(document.querySelector(".video-card-media")).pointerEvents,
+  }));
+  assert.deepEqual(
+    {
+      autoplay: mobileVideo.autoplay,
+      playsinline: mobileVideo.playsinline,
+      muted: mobileVideo.muted,
+      loop: mobileVideo.loop,
+      thumbnailPointerEvents: mobileVideo.thumbnailPointerEvents,
+    },
+    {
+      autoplay: true,
+      playsinline: true,
+      muted: true,
+      loop: true,
+      thumbnailPointerEvents: "none",
+    },
+    "the mobile modal exposes inline muted autoplay and the whole card remains tappable",
+  );
+  assert.ok(mobileVideo.playCalls >= 1, "opening a card immediately calls video.play()");
+  await p.click("#video-close");
+  await p.waitForSelector(".modal-video", { state: "detached" });
+  await p.evaluate(() => { HTMLMediaElement.prototype.play = window.nativeVideoPlay; });
+  await p.click("#btn-open-pass");
+  await p.waitForSelector("#pass-form");
+  assert.equal(await p.locator("#pass-recover").count(), 1);
+  await p.click("#pass-recover");
+  await p.waitForSelector("#pass-recovery-form");
+  assert.equal(await p.locator("#pass-recovery-name").count(), 1);
+  assert.equal(await p.locator("#pass-recovery-email").count(), 1);
+  await p.click("#pass-close");
+  await p.waitForSelector(".pass-modal", { state: "detached" });
+
+  // A recovered member sees their pass (name, balance, QR area) in-app,
+  // without any exported-image action.
+  await p.evaluate((memberId) => localStorage.setItem("juvia_client_id", memberId), uuid);
+  await p.click("#btn-open-pass");
+  await p.waitForSelector(".loyalty-card");
+  const passView = await p.locator(".pass-view").evaluate((view) => ({
+    holder: view.querySelector(".pass-holder h3").textContent.trim(),
+    points: view.querySelector(".pass-points strong").textContent.trim(),
+    hasQrArea: !!view.querySelector("#pass-qr-box"),
+    hasDownload: !!view.querySelector("#pass-download"),
+  }));
+  assert.deepEqual(passView, {
+    holder: "Test Member",
+    points: "20",
+    hasQrArea: true,
+    hasDownload: false,
+  });
+  console.log("mobile video autoplay and on-screen pass-only flow passed");
+
   for (const width of [320, 390, 1440]) {
     await p.setViewportSize({ width, height: 1000 });
     await p.goto(baseURL + "/staff-scan.html");
