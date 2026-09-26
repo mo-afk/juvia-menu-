@@ -613,8 +613,10 @@ var TEST_VIDEO_POSTER_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev
 var TEST_VIDEO_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/%5B%40download_it_bot%201080p%5D%20Video%20by%20juvia%20oujda.mp4';
 
 function videoCardHTML(dish, index, catIndex) {
-  return '<button class="video-card crop-' + index + '" data-dish-cat="' + catIndex + '" data-dish-name="' + esc(dish.n) + '" aria-label="Voir la vidéo de ' + esc(dish.n) + '">' +
-    '<video class="video-card-media" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop aria-hidden="true"></video>' +
+  // The card is one native button, so every visible part of it keeps the
+  // tap as a trusted user gesture for the modal video on mobile browsers.
+  return '<button type="button" class="video-card crop-' + index + '" data-dish-cat="' + catIndex + '" data-dish-name="' + esc(dish.n) + '" aria-label="Voir la vidéo de ' + esc(dish.n) + '" aria-haspopup="dialog">' +
+    '<video class="video-card-media" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop aria-hidden="true" tabindex="-1"></video>' +
     '<span class="video-play">' + ic('play', 15, 'fill="currentColor"') + '</span>' +
     '<span class="video-duration">0:' + (12 + index * 3) + '</span>' +
     '<b>' + esc(dish.n) + '</b>' +
@@ -692,9 +694,11 @@ function renderMenuPage() {
     });
   });
 
-  // Video cards
+  // Video cards are native buttons. Since their visual children do not receive
+  // pointer events, a tap anywhere on a card reaches this trusted click handler.
   document.querySelectorAll('.video-card').forEach(function (card) {
-    card.addEventListener('click', function () {
+    card.addEventListener('click', function (event) {
+      event.preventDefault();
       var catIndex = parseInt(card.getAttribute('data-dish-cat'), 10);
       var name = card.getAttribute('data-dish-name');
       var dish = menu[catIndex] && menu[catIndex].dishes.find(function (d) { return d.n === name; });
@@ -758,11 +762,13 @@ function openVideoModal(dish) {
   var host = document.getElementById('video-root');
   if (!host) return;
   host.innerHTML =
-    '<div class="video-modal" role="dialog" aria-modal="true">' +
-      '<button class="modal-bg" id="video-bg"></button>' +
+    '<div class="video-modal" role="dialog" aria-modal="true" aria-label="Vidéo de ' + esc(dish.n) + '">' +
+      '<button type="button" class="modal-bg" id="video-bg" aria-label="Fermer la vidéo"></button>' +
       '<div class="modal-card">' +
-        '<button class="modal-close" id="video-close">' + ic('x', 18) + '</button>' +
-        '<div class="modal-image"><video class="modal-video" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop controls aria-label="Lire la vidéo de ' + esc(dish.n) + '"></video></div>' +
+        '<button type="button" class="modal-close" id="video-close" aria-label="Fermer la vidéo">' + ic('x', 18) + '</button>' +
+        // These attributes must stay in the HTML: iOS Safari and Android use
+        // them to permit immediate inline, muted autoplay after the card tap.
+        '<div class="modal-image"><video class="modal-video" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="auto" autoplay playsinline webkit-playsinline muted loop controls aria-label="Lire la vidéo de ' + esc(dish.n) + '"></video></div>' +
         '<span class="modal-kicker">Dans les coulisses</span>' +
         '<h2>' + esc(dish.n) + '</h2>' +
         '<p>' + esc(dish.d) + '</p>' +
@@ -770,7 +776,33 @@ function openVideoModal(dish) {
       '</div>' +
     '</div>';
   refreshIcons();
-  function close() { host.innerHTML = ''; }
+
+  // Call play during the original click handler, rather than waiting for a
+  // timeout or animation. This preserves mobile browsers' user activation.
+  var video = host.querySelector('.modal-video');
+  if (video) {
+    video.muted = true;
+    video.defaultMuted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.loop = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('autoplay', '');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('loop', '');
+    try {
+      var playAttempt = video.play();
+      if (playAttempt && typeof playAttempt.catch === 'function') playAttempt.catch(function () {});
+    } catch (e) { /* Native controls remain available if playback cannot start. */ }
+  }
+
+  function close() {
+    if (video) {
+      try { video.pause(); } catch (e) {}
+    }
+    host.innerHTML = '';
+  }
   document.getElementById('video-bg').addEventListener('click', close);
   document.getElementById('video-close').addEventListener('click', close);
 }
@@ -1260,82 +1292,8 @@ function passViewHTML(client) {
         '<span>Présentez ce code à la caisse</span></div>' +
       '<div class="pass-number">N° ' + esc(String(client.id).slice(0, 8).toUpperCase()) + '</div>' +
     '</div>' +
-    '<button class="download-pass" id="pass-download" type="button">' + ic('download', 17) + ' Télécharger mon Pass</button>' +
     '<button class="pass-forget" id="pass-forget" type="button">Ce n’est pas votre carte ?</button>' +
   '</div>';
-}
-
-function passFileName(client) {
-  var name = String(clientName(client)).trim();
-  // Keep Latin accents and Arabic names readable in the downloaded filename.
-  name = name.replace(/[^\w\u00c0-\u024f\u0600-\u06ff]+/gi, '-').replace(/^-+|-+$/g, '');
-  return 'Juvia-Pass-' + (name || 'Client') + '.png';
-}
-
-function canvasPNGBlob(canvas) {
-  return new Promise(function (resolve, reject) {
-    if (typeof canvas.toBlob === 'function') {
-      canvas.toBlob(function (blob) {
-        if (blob) resolve(blob);
-        else reject(new Error('PNG export failed'));
-      }, 'image/png');
-      return;
-    }
-    try {
-      var data = canvas.toDataURL('image/png');
-      var binary = atob(data.split(',')[1]);
-      var bytes = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      resolve(new Blob([bytes], { type: 'image/png' }));
-    } catch (error) { reject(error); }
-  });
-}
-
-function downloadPassImage() {
-  var card = document.querySelector('.loyalty-card');
-  var button = document.getElementById('pass-download');
-  if (!card || !button || !appState.pass.client) return;
-  if (typeof window.html2canvas !== 'function') {
-    return setPassError('Le téléchargement de votre pass est momentanément indisponible.');
-  }
-
-  var originalHTML = button.innerHTML;
-  button.disabled = true;
-  button.setAttribute('aria-busy', 'true');
-  button.innerHTML = ic('loader-circle', 17) + ' Préparation…';
-  refreshIcons();
-
-  var fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
-  Promise.resolve(fontsReady).catch(function () {}).then(function () {
-    return window.html2canvas(card, {
-      scale: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
-      useCORS: true,
-      backgroundColor: '#f4eee3',
-      logging: false,
-      imageTimeout: 15000
-    });
-  }).then(canvasPNGBlob).then(function (blob) {
-    var url = URL.createObjectURL(blob);
-    var link = document.createElement('a');
-    link.href = url;
-    link.download = passFileName(appState.pass.client);
-    link.rel = 'noopener';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(function () {
-      link.remove();
-      URL.revokeObjectURL(url);
-    }, 1000);
-  }).catch(function (error) {
-    console.error('Juvia Pass image download:', error);
-    setPassError('Impossible de télécharger votre pass. Réessayez.');
-  }).finally(function () {
-    button.disabled = false;
-    button.removeAttribute('aria-busy');
-    button.innerHTML = originalHTML;
-    refreshIcons();
-  });
 }
 
 function passFormHTML() {
@@ -1403,8 +1361,6 @@ function renderPassModalBody() {
   refreshIcons();
 
   if (p.client) {
-    var downloadBtn = document.getElementById('pass-download');
-    if (downloadBtn) downloadBtn.addEventListener('click', downloadPassImage);
     var forgetBtn = document.getElementById('pass-forget');
     if (forgetBtn) forgetBtn.addEventListener('click', function () {
       safeStorage.remove('localStorage', PASS_STORAGE_KEY);
@@ -1488,7 +1444,7 @@ function setPassError(message) {
       viewError = document.createElement('div');
       viewError.className = 'pass-error';
       viewError.textContent = message;
-      passView.insertBefore(viewError, document.getElementById('pass-download') || document.getElementById('pass-forget'));
+      passView.insertBefore(viewError, document.getElementById('pass-forget'));
     }
   }
 }
