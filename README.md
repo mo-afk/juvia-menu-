@@ -64,7 +64,9 @@ npm test
 
 The browser tests use the actual bundled decoder, a generated QR code in a
 synthetic camera stream, and mocked Supabase responses (no production writes).
-They check mobile/desktop widths, successful decoding and camera shutdown,
+They check mobile/desktop widths, the tap-to-play video modal (inline muted
+attributes, `play()` requested inside the tap before the reveal animation,
+pause + rewind to 0 on close), successful decoding and camera shutdown,
 unknown members, permission denial, cancellation, restart, and manual fallback.
 Use `BASE_URL` for a different server, or `BROWSER_EXECUTABLE_PATH` for an
 already-installed Chromium. Real-device autofocus/permissions still need a
