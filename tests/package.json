@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "test": "node browser.cjs",
-    "test:smoke": "node close-modal.cjs"
+    "test:smoke": "node close-modal.cjs",
+    "test:autoplay": "node video-autoplay.cjs"
   },
   "devDependencies": {
     "jsdom": "^30.1.1",

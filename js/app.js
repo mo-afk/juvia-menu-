@@ -756,13 +756,60 @@ function setActiveCategory(id) {
 }
 
 /* ------------------------------------------------------------
-   Video modal
-   ------------------------------------------------------------ */
+   Video modal — iOS Safari hardened
+   ------------------------------------------------------------
+   iOS Safari autoplay contract applied here:
+   1. The media element gets its source + muted + inline-playback flags
+      BEFORE play() is requested, in that exact order.
+   2. play() runs synchronously inside the card tap, so the trusted
+      user gesture is still active when WebKit checks it.
+   3. Native controls are NEVER rendered in the modal: iOS paints the
+      OS-level media UI above the DOM, where it swallows taps (which
+      froze the close X / backdrop) and shows the blocked-play icon.
+      A DOM fallback play button covers the rare blocked-autoplay case. */
+
+function getModalVideo() {
+  var modal = document.getElementById('video-modal');
+  return modal ? modal.querySelector('.modal-video') : null;
+}
+
+function showVideoFallback() {
+  var fallback = document.getElementById('video-fallback');
+  if (fallback) fallback.hidden = false;
+}
+
+function hideVideoFallback() {
+  var fallback = document.getElementById('video-fallback');
+  if (fallback) fallback.hidden = true;
+}
+
+function requestModalVideoPlay(video) {
+  try {
+    var playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise.then(function () {
+        hideVideoFallback();
+      }).catch(function (error) {
+        console.warn('Autoplay bloqué — bouton de lecture de secours affiché:', error);
+        showVideoFallback();
+      });
+    }
+  } catch (error) {
+    console.warn('Autoplay bloqué — bouton de lecture de secours affiché:', error);
+    showVideoFallback();
+  }
+}
+
+function onVideoModalKeydown(event) {
+  if (event.key === 'Escape' && document.getElementById('video-modal')) closeVideoModal();
+}
+
 // Closes and tears down the video modal. Deliberately defensive: every step
 // is guarded so a media/detached-node error can never leave the modal stuck
 // open again (the previous inline close() threw on an undefined variable and
 // aborted before removing the modal).
 function closeVideoModal() {
+  document.removeEventListener('keydown', onVideoModalKeydown);
   var modal = document.getElementById('video-modal');
   if (modal) {
     var video = modal.querySelector('video');
@@ -770,7 +817,7 @@ function closeVideoModal() {
       try { video.pause(); } catch (e) { /* Already detached. */ }
       try { video.currentTime = 0; } catch (e) { /* Detached or unloaded media. */ }
     }
-    modal.classList.remove('open', 'is-entering');
+    modal.classList.remove('open', 'is-entering'); // dismiss the modal
   }
   document.body.style.overflow = ''; // Restore page scrolling
   var host = document.getElementById('video-root');
@@ -782,6 +829,7 @@ function openVideoModal(dish) {
   if (!host) return;
   // is-entering keeps the slide-up reveal paused until playback has been
   // requested, so play() always wins the tap on iOS Safari.
+  // NOTE: the <video> deliberately has NO `controls` attribute — see banner.
   host.innerHTML =
     '<div class="video-modal open is-entering" id="video-modal" role="dialog" aria-modal="true" aria-label="Vidéo de ' + esc(dish.n) + '">' +
       '<button type="button" class="modal-bg" id="video-bg" aria-label="Fermer la vidéo"></button>' +
@@ -789,7 +837,10 @@ function openVideoModal(dish) {
         '<button type="button" class="modal-close" id="video-close" aria-label="Fermer la vidéo">' + ic('x', 18) + '</button>' +
         // These attributes must stay in the HTML: iOS Safari and Android use
         // them to permit immediate inline, muted autoplay after the card tap.
-        '<div class="modal-image"><video class="modal-video" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="auto" autoplay playsinline webkit-playsinline muted loop controls aria-label="Lire la vidéo de ' + esc(dish.n) + '"></video></div>' +
+        '<div class="modal-image">' +
+          '<video class="modal-video" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="auto" autoplay playsinline webkit-playsinline muted loop aria-label="Lire la vidéo de ' + esc(dish.n) + '"></video>' +
+          '<button type="button" class="video-fallback" id="video-fallback" hidden>' + ic('play', 20, 'fill="currentColor"') + '<span>Touchez pour lancer la vidéo</span></button>' +
+        '</div>' +
         '<span class="modal-kicker">Dans les coulisses</span>' +
         '<h2>' + esc(dish.n) + '</h2>' +
         '<p>' + esc(dish.d) + '</p>' +
@@ -799,42 +850,38 @@ function openVideoModal(dish) {
 
   // The card click calls this synchronously, so prepare the new media element
   // and request playback while the original iOS Safari tap is still active.
-  // The modal remains visually gated until after this request is made.
   var modal = host.querySelector('.video-modal');
   var modalVideo = host.querySelector('.modal-video');
   if (modalVideo) {
     var videoUrl = TEST_VIDEO_URL;
-    modalVideo.pause();
+
+    // iOS Safari fix — the exact order matters: source, muted and inline
+    // playback flags are ALL applied before .play(), inside the trusted
+    // card-tap gesture. Never call load() between src and these flags.
+    try { modalVideo.pause(); } catch (e) { /* Fresh element. */ }
     modalVideo.src = videoUrl;
-    modalVideo.load();
     modalVideo.muted = true;
     modalVideo.defaultMuted = true;
-    modalVideo.autoplay = true;
     modalVideo.playsInline = true;
-    modalVideo.loop = true;
-    modalVideo.controls = true;
-    modalVideo.setAttribute('muted', '');
-    modalVideo.setAttribute('autoplay', '');
     modalVideo.setAttribute('playsinline', '');
     modalVideo.setAttribute('webkit-playsinline', '');
-    modalVideo.setAttribute('loop', '');
-    modalVideo.setAttribute('controls', '');
+    modalVideo.setAttribute('muted', '');
+    modalVideo.loop = true;
+    modalVideo.autoplay = true;
+    modalVideo.preload = 'auto';
+    try { modalVideo.load(); } catch (e) { /* All flags above are set first. */ }
     try { modalVideo.currentTime = 0; } catch (e) { /* No media data loaded yet. */ }
 
-    try {
-      var playPromise = modalVideo.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(function (error) {
-          console.log('iOS Autoplay prevented:', error);
-          modalVideo.controls = true;
-          modalVideo.setAttribute('controls', '');
-        });
-      }
-    } catch (error) {
-      console.log('iOS Autoplay prevented:', error);
-      modalVideo.controls = true;
-      modalVideo.setAttribute('controls', '');
-    }
+    requestModalVideoPlay(modalVideo);
+
+    // Native controls stay off; tapping the video itself toggles pause/play
+    // so viewers keep full control without the OS-level player UI.
+    modalVideo.addEventListener('click', function () {
+      try {
+        if (modalVideo.paused) requestModalVideoPlay(modalVideo);
+        else modalVideo.pause();
+      } catch (e) { /* Detached media. */ }
+    });
   }
 
   // Playback is on its way, so unpause the reveal on the next frame.
@@ -845,38 +892,50 @@ function openVideoModal(dish) {
   }
   refreshIcons();
 
+  // Last-chance play target: a fresh trusted gesture restarts playback
+  // (e.g. Low Power Mode) — still without any native controls.
+  var fallbackBtn = document.getElementById('video-fallback');
+  if (fallbackBtn) {
+    fallbackBtn.addEventListener('click', function () {
+      var video = getModalVideo();
+      if (video) requestModalVideoPlay(video);
+    });
+  }
+
   // Lock page scrolling while the modal is up (closeVideoModal restores it).
   document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onVideoModalKeydown);
 
   // Event listeners for close button, backdrop and overlay — click AND
   // touchend so taps close instantly on mobile instead of relying on the
-  // synthetic click, which native video controls can swallow.
+  // synthetic click. preventDefault on touchend suppresses that synthetic
+  // click so the handler never fires twice.
+  var onTapClose = function (event) {
+    if (event.type === 'touchend' && typeof event.preventDefault === 'function') event.preventDefault();
+    closeVideoModal();
+  };
+
   var closeBtn = document.getElementById('video-close');
   var backdropBtn = document.getElementById('video-bg');
-  var modalOverlay = document.getElementById('video-modal');
 
   if (closeBtn) {
-    closeBtn.addEventListener('click', closeVideoModal);
-    closeBtn.addEventListener('touchend', function (e) {
-      e.preventDefault(); // Suppress the synthetic click to avoid double-fire.
-      closeVideoModal();
-    });
+    closeBtn.addEventListener('click', onTapClose);
+    closeBtn.addEventListener('touchend', onTapClose);
   }
 
   // The dedicated backdrop button covers all "outside empty space".
   if (backdropBtn) {
-    backdropBtn.addEventListener('click', closeVideoModal);
-    backdropBtn.addEventListener('touchend', function (e) {
-      e.preventDefault();
-      closeVideoModal();
-    });
+    backdropBtn.addEventListener('click', onTapClose);
+    backdropBtn.addEventListener('touchend', onTapClose);
   }
 
   // Safety net for taps that land on the overlay itself (e.g. grid gaps).
-  if (modalOverlay) {
-    modalOverlay.addEventListener('click', function (e) {
-      if (e.target === modalOverlay) closeVideoModal();
-    });
+  if (modal) {
+    var onOverlayTap = function (event) {
+      if (event.target === modal) onTapClose(event);
+    };
+    modal.addEventListener('click', onOverlayTap);
+    modal.addEventListener('touchend', onOverlayTap);
   }
 }
 
