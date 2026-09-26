@@ -15,7 +15,7 @@
      → anon public  (starts with "eyJ…" or "sb_publishable_…")
    ------------------------------------------------------------ */
 const SUPABASE_URL = "https://epikmapynijxwomhbydo.supabase.co";
-const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY_HERE";
+const SUPABASE_ANON_KEY = "sb_publishable_PVzcih9toX1nlXzUabRLow_EmwNAQVF";
 
 var supabase = null;
 (function initSupabase() {
@@ -648,12 +648,12 @@ function renderMenuPage() {
   html += '</main>' +
     '<footer>' + logoHTML() +
       '<p>Des instants qui ont du goût.</p>' +
-      '<a class="location" href="https://maps.google.com/?q=Casablanca,Morocco" target="_blank" rel="noreferrer">' +
+      '<a class="location" href="https://maps.app.goo.gl/HbK9yQeZqMC5ZQQL7" target="_blank" rel="noreferrer">' +
         ic('map-pin', 17) + '<span>Ouvrir dans Google Maps</span>' + ic('chevron-right', 16) + '</a>' +
       '<div class="socials">' +
-        '<a href="https://instagram.com" aria-label="Instagram">' + ic('instagram', 15) + '</a>' +
-        '<a href="https://facebook.com" aria-label="Facebook">' + ic('facebook', 15) + '</a>' +
-        '<a href="https://tiktok.com" aria-label="TikTok">' + ic('music-2', 15) + '</a>' +
+        '<a href="https://www.instagram.com/juvia_oujda/?hl=en" aria-label="Instagram">' + ic('instagram', 15) + '</a>' +
+        '<a href="https://www.facebook.com/profile.php?id=61560561884629" aria-label="Facebook">' + ic('facebook', 15) + '</a>' +
+        '<a href="https://www.tiktok.com/@juvia.restaurant.oujda?is_from_webapp=1&sender_device=pc" aria-label="TikTok">' + ic('music-2', 15) + '</a>' +
       '</div>' +
       '<a class="staff-footer-link" href="staff-scan.html">' + ic('lock-keyhole', 10) + ' Espace Staff</a>' +
       '<small>© 2026 Juvia Café &amp; Restaurant</small></footer>' +
