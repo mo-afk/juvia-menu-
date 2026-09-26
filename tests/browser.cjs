@@ -122,49 +122,117 @@ const path = require("node:path");
     console.log("layout", width, menu, staff);
   }
   // Mobile menu regression: one tap anywhere on a video card opens its modal
-  // and requests playback while the tap is still a trusted user gesture.
+  // and requests playback while the tap is still a trusted user gesture,
+  // before the modal's reveal animation is allowed to run.
   await p.setViewportSize({ width: 390, height: 844 });
   await p.goto(baseURL + "/index.html");
   await p.waitForSelector(".video-card");
   await p.evaluate(() => {
     window.videoPlayCalls = 0;
+    window.pauseCalls = 0;
+    window.currentTimeWrites = [];
+    window.playContext = null;
     window.nativeVideoPlay = HTMLMediaElement.prototype.play;
+    window.nativeVideoPause = HTMLMediaElement.prototype.pause;
+    window.nativeCurrentTime = Object.getOwnPropertyDescriptor(
+      HTMLMediaElement.prototype,
+      "currentTime",
+    );
     HTMLMediaElement.prototype.play = function () {
       window.videoPlayCalls += 1;
+      const modal = document.querySelector(".video-modal");
+      const card = document.querySelector(".modal-card");
+      window.playContext = {
+        revealGated: !!modal && modal.classList.contains("is-entering"),
+        revealAnimation: card ? getComputedStyle(card).animationPlayState : null,
+      };
       return Promise.resolve();
     };
+    HTMLMediaElement.prototype.pause = function () {
+      window.pauseCalls += 1;
+      return window.nativeVideoPause.apply(this, arguments);
+    };
+    Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+      get: window.nativeCurrentTime.get,
+      set(value) {
+        window.currentTimeWrites.push(value);
+        return window.nativeCurrentTime.set.call(this, value);
+      },
+      configurable: true,
+    });
   });
   await p.locator(".video-card").first().click({ position: { x: 8, y: 8 } });
   await p.waitForSelector(".modal-video");
   const mobileVideo = await p.locator(".modal-video").evaluate((video) => ({
     autoplay: video.hasAttribute("autoplay") && video.autoplay,
     playsinline: video.hasAttribute("playsinline") && video.playsInline,
-    muted: video.hasAttribute("muted") && video.muted,
+    webkitPlaysinline: video.hasAttribute("webkit-playsinline"),
+    muted: video.hasAttribute("muted") && video.muted && video.defaultMuted,
     loop: video.hasAttribute("loop") && video.loop,
+    preload: video.getAttribute("preload"),
     playCalls: window.videoPlayCalls,
+    playContext: window.playContext,
+    revealReleased: !document.querySelector(".video-modal").classList.contains("is-entering"),
+    openWrites: window.currentTimeWrites.slice(),
     thumbnailPointerEvents: getComputedStyle(document.querySelector(".video-card-media")).pointerEvents,
   }));
   assert.deepEqual(
     {
       autoplay: mobileVideo.autoplay,
       playsinline: mobileVideo.playsinline,
+      webkitPlaysinline: mobileVideo.webkitPlaysinline,
       muted: mobileVideo.muted,
       loop: mobileVideo.loop,
+      preload: mobileVideo.preload,
       thumbnailPointerEvents: mobileVideo.thumbnailPointerEvents,
     },
     {
       autoplay: true,
       playsinline: true,
+      webkitPlaysinline: true,
       muted: true,
       loop: true,
+      preload: "auto",
       thumbnailPointerEvents: "none",
     },
     "the mobile modal exposes inline muted autoplay and the whole card remains tappable",
   );
   assert.ok(mobileVideo.playCalls >= 1, "opening a card immediately calls video.play()");
+  assert.deepEqual(
+    mobileVideo.playContext,
+    { revealGated: true, revealAnimation: "paused" },
+    "play() runs in the tap handler, before the reveal animation starts",
+  );
+  assert.equal(
+    mobileVideo.revealReleased,
+    true,
+    "the reveal animation is released once playback has been requested",
+  );
+  assert.deepEqual(mobileVideo.openWrites, [0], "opening rewinds the video to 0");
+  await p.locator(".modal-video").evaluate((video) => {
+    video.currentTime = 3.5;
+  });
   await p.click("#video-close");
   await p.waitForSelector(".modal-video", { state: "detached" });
-  await p.evaluate(() => { HTMLMediaElement.prototype.play = window.nativeVideoPlay; });
+  const closedVideo = await p.evaluate(() => ({
+    pauseCalls: window.pauseCalls,
+    writes: window.currentTimeWrites.slice(),
+  }));
+  assert.ok(closedVideo.pauseCalls >= 1, "closing the modal pauses playback");
+  assert.deepEqual(
+    closedVideo.writes,
+    [0, 3.5, 0],
+    "closing pauses the video and rewinds it to 0",
+  );
+  await p.evaluate(() => {
+    HTMLMediaElement.prototype.play = window.nativeVideoPlay;
+    HTMLMediaElement.prototype.pause = window.nativeVideoPause;
+    Object.defineProperty(
+      HTMLMediaElement.prototype,
+      "currentTime",
+      window.nativeCurrentTime,
+    );
+  });
   await p.click("#btn-open-pass");
   await p.waitForSelector("#pass-form");
   assert.equal(await p.locator("#pass-recover").count(), 1);

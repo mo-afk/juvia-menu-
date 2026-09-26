@@ -761,8 +761,10 @@ function setActiveCategory(id) {
 function openVideoModal(dish) {
   var host = document.getElementById('video-root');
   if (!host) return;
+  // is-entering keeps the slide-up reveal paused until playback has been
+  // requested, so play() always wins the tap on iOS Safari.
   host.innerHTML =
-    '<div class="video-modal" role="dialog" aria-modal="true" aria-label="Vidéo de ' + esc(dish.n) + '">' +
+    '<div class="video-modal is-entering" role="dialog" aria-modal="true" aria-label="Vidéo de ' + esc(dish.n) + '">' +
       '<button type="button" class="modal-bg" id="video-bg" aria-label="Fermer la vidéo"></button>' +
       '<div class="modal-card">' +
         '<button type="button" class="modal-close" id="video-close" aria-label="Fermer la vidéo">' + ic('x', 18) + '</button>' +
@@ -775,10 +777,11 @@ function openVideoModal(dish) {
         '<strong>' + dish.p + ' dh</strong>' +
       '</div>' +
     '</div>';
-  refreshIcons();
 
-  // Call play during the original click handler, rather than waiting for a
-  // timeout or animation. This preserves mobile browsers' user activation.
+  // Nothing may run between the tap and this call: iOS Safari only counts
+  // play() as user-activated while the original event handler is still on the
+  // stack, so it happens before the icon refresh and before the reveal.
+  var modal = host.querySelector('.video-modal');
   var video = host.querySelector('.modal-video');
   if (video) {
     video.muted = true;
@@ -791,15 +794,25 @@ function openVideoModal(dish) {
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
     video.setAttribute('loop', '');
+    try { video.currentTime = 0; } catch (e) { /* No media data loaded yet. */ }
     try {
       var playAttempt = video.play();
       if (playAttempt && typeof playAttempt.catch === 'function') playAttempt.catch(function () {});
     } catch (e) { /* Native controls remain available if playback cannot start. */ }
   }
 
+  // Playback is on its way, so unpause the reveal on the next frame.
+  if (modal) {
+    var reveal = function () { modal.classList.remove('is-entering'); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(reveal);
+    else reveal();
+  }
+  refreshIcons();
+
   function close() {
     if (video) {
       try { video.pause(); } catch (e) {}
+      try { video.currentTime = 0; } catch (e) { /* Detached or unloaded media. */ }
     }
     host.innerHTML = '';
   }

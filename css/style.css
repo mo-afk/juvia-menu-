@@ -245,3 +245,11 @@
   select,
   textarea{font-size:16px!important}
 }
+
+/* ============================================================
+   Video modal — playback starts before the reveal on iOS
+   ============================================================ */
+/* js/app.js calls video.play() inside the card's tap handler while the modal
+   still carries .is-entering, then drops that class on the next frame. Pausing
+   the slide-up here means the animation can only begin after play() returned. */
+.video-modal.is-entering .modal-card{animation-play-state:paused}
