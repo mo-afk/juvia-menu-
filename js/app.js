@@ -778,27 +778,44 @@ function openVideoModal(dish) {
       '</div>' +
     '</div>';
 
-  // Nothing may run between the tap and this call: iOS Safari only counts
-  // play() as user-activated while the original event handler is still on the
-  // stack, so it happens before the icon refresh and before the reveal.
+  // The card click calls this synchronously, so prepare the new media element
+  // and request playback while the original iOS Safari tap is still active.
+  // The modal remains visually gated until after this request is made.
   var modal = host.querySelector('.video-modal');
-  var video = host.querySelector('.modal-video');
-  if (video) {
-    video.muted = true;
-    video.defaultMuted = true;
-    video.autoplay = true;
-    video.playsInline = true;
-    video.loop = true;
-    video.setAttribute('muted', '');
-    video.setAttribute('autoplay', '');
-    video.setAttribute('playsinline', '');
-    video.setAttribute('webkit-playsinline', '');
-    video.setAttribute('loop', '');
-    try { video.currentTime = 0; } catch (e) { /* No media data loaded yet. */ }
+  var modalVideo = host.querySelector('.modal-video');
+  if (modalVideo) {
+    var videoUrl = TEST_VIDEO_URL;
+    modalVideo.pause();
+    modalVideo.src = videoUrl;
+    modalVideo.load();
+    modalVideo.muted = true;
+    modalVideo.defaultMuted = true;
+    modalVideo.autoplay = true;
+    modalVideo.playsInline = true;
+    modalVideo.loop = true;
+    modalVideo.controls = true;
+    modalVideo.setAttribute('muted', '');
+    modalVideo.setAttribute('autoplay', '');
+    modalVideo.setAttribute('playsinline', '');
+    modalVideo.setAttribute('webkit-playsinline', '');
+    modalVideo.setAttribute('loop', '');
+    modalVideo.setAttribute('controls', '');
+    try { modalVideo.currentTime = 0; } catch (e) { /* No media data loaded yet. */ }
+
     try {
-      var playAttempt = video.play();
-      if (playAttempt && typeof playAttempt.catch === 'function') playAttempt.catch(function () {});
-    } catch (e) { /* Native controls remain available if playback cannot start. */ }
+      var playPromise = modalVideo.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(function (error) {
+          console.log('iOS Autoplay prevented:', error);
+          modalVideo.controls = true;
+          modalVideo.setAttribute('controls', '');
+        });
+      }
+    } catch (error) {
+      console.log('iOS Autoplay prevented:', error);
+      modalVideo.controls = true;
+      modalVideo.setAttribute('controls', '');
+    }
   }
 
   // Playback is on its way, so unpause the reveal on the next frame.

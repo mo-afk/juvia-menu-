@@ -130,16 +130,24 @@ const path = require("node:path");
   await p.evaluate(() => {
     window.videoPlayCalls = 0;
     window.pauseCalls = 0;
+    window.loadCalls = 0;
+    window.videoPreparationCalls = [];
     window.currentTimeWrites = [];
     window.playContext = null;
     window.nativeVideoPlay = HTMLMediaElement.prototype.play;
     window.nativeVideoPause = HTMLMediaElement.prototype.pause;
+    window.nativeVideoLoad = HTMLMediaElement.prototype.load;
     window.nativeCurrentTime = Object.getOwnPropertyDescriptor(
       HTMLMediaElement.prototype,
       "currentTime",
     );
+    HTMLMediaElement.prototype.load = function () {
+      window.loadCalls += 1;
+      window.videoPreparationCalls.push("load");
+    };
     HTMLMediaElement.prototype.play = function () {
       window.videoPlayCalls += 1;
+      window.videoPreparationCalls.push("play");
       const modal = document.querySelector(".video-modal");
       const card = document.querySelector(".modal-card");
       window.playContext = {
@@ -150,6 +158,7 @@ const path = require("node:path");
     };
     HTMLMediaElement.prototype.pause = function () {
       window.pauseCalls += 1;
+      window.videoPreparationCalls.push("pause");
       return window.nativeVideoPause.apply(this, arguments);
     };
     Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
@@ -170,6 +179,9 @@ const path = require("node:path");
     muted: video.hasAttribute("muted") && video.muted && video.defaultMuted,
     loop: video.hasAttribute("loop") && video.loop,
     preload: video.getAttribute("preload"),
+    controls: video.hasAttribute("controls") && video.controls,
+    loadCalls: window.loadCalls,
+    preparationCalls: window.videoPreparationCalls.slice(),
     playCalls: window.videoPlayCalls,
     playContext: window.playContext,
     revealReleased: !document.querySelector(".video-modal").classList.contains("is-entering"),
@@ -184,6 +196,7 @@ const path = require("node:path");
       muted: mobileVideo.muted,
       loop: mobileVideo.loop,
       preload: mobileVideo.preload,
+      controls: mobileVideo.controls,
       thumbnailPointerEvents: mobileVideo.thumbnailPointerEvents,
     },
     {
@@ -193,11 +206,18 @@ const path = require("node:path");
       muted: true,
       loop: true,
       preload: "auto",
+      controls: true,
       thumbnailPointerEvents: "none",
     },
     "the mobile modal exposes inline muted autoplay and the whole card remains tappable",
   );
   assert.ok(mobileVideo.playCalls >= 1, "opening a card immediately calls video.play()");
+  assert.equal(mobileVideo.loadCalls, 1, "opening explicitly loads the source in the tap handler");
+  assert.deepEqual(
+    mobileVideo.preparationCalls.slice(0, 3),
+    ["pause", "load", "play"],
+    "the video is paused and explicitly loaded before playback is requested",
+  );
   assert.deepEqual(
     mobileVideo.playContext,
     { revealGated: true, revealAnimation: "paused" },
@@ -227,6 +247,7 @@ const path = require("node:path");
   await p.evaluate(() => {
     HTMLMediaElement.prototype.play = window.nativeVideoPlay;
     HTMLMediaElement.prototype.pause = window.nativeVideoPause;
+    HTMLMediaElement.prototype.load = window.nativeVideoLoad;
     Object.defineProperty(
       HTMLMediaElement.prototype,
       "currentTime",
