@@ -254,6 +254,60 @@ const path = require("node:path");
       window.nativeCurrentTime,
     );
   });
+
+  // Critical regression: the video modal must always be closable — the X, the
+  // backdrop and touch taps each close it, page scrolling is locked while it
+  // is open and restored when it closes, and taps inside the card never close
+  // it. (A regression here left the modal permanently stuck open.)
+  const reopenModal = async () => {
+    await p.locator(".video-card").first().click({ position: { x: 8, y: 8 } });
+    await p.waitForSelector("#video-modal");
+  };
+  const modalGone = () =>
+    p.waitForSelector("#video-modal", { state: "detached" });
+
+  await reopenModal();
+  assert.equal(
+    await p.evaluate(() => document.body.style.overflow),
+    "hidden",
+    "opening the video modal locks page scrolling",
+  );
+  await p.click("#video-bg", { position: { x: 12, y: 12 } });
+  await modalGone();
+  assert.equal(
+    await p.evaluate(() => document.body.style.overflow),
+    "",
+    "backdrop click closes the modal and restores page scrolling",
+  );
+
+  await reopenModal();
+  // Taps on the empty space hit the dedicated backdrop button; on mobile the
+  // touchend handler must close without relying on the synthetic click.
+  await p.locator("#video-bg").dispatchEvent("touchend");
+  await modalGone();
+
+  await reopenModal();
+  await p.locator("#video-close").dispatchEvent("touchend");
+  await modalGone();
+  assert.equal(
+    await p.evaluate(() => document.body.style.overflow),
+    "",
+    "touchend close restores page scrolling",
+  );
+
+  await reopenModal();
+  // Interacting with the video/card must NOT close the modal...
+  await p.locator(".modal-card h2").click();
+  await p.waitForTimeout(150);
+  assert.ok(
+    await p.locator("#video-modal").count(),
+    "clicks inside the modal card do not close the modal",
+  );
+  // ...and the X still works after such interactions.
+  await p.click("#video-close");
+  await modalGone();
+  console.log("video modal close paths passed (X, backdrop, touch, scroll lock)");
+
   await p.click("#btn-open-pass");
   await p.waitForSelector("#pass-form");
   assert.equal(await p.locator("#pass-recover").count(), 1);

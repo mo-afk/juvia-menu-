@@ -2,9 +2,11 @@
   "name": "juvia-browser-tests",
   "private": true,
   "scripts": {
-    "test": "node browser.cjs"
+    "test": "node browser.cjs",
+    "test:smoke": "node close-modal.cjs"
   },
   "devDependencies": {
+    "jsdom": "^30.1.1",
     "playwright": "1.63.0",
     "qrcode": "1.5.4"
   }
