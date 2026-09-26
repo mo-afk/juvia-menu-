@@ -568,14 +568,14 @@ var appState = {
   sound: true,
   gameTab: 'payer',
   passOpen: false,
-  installPrompt: null,
   pass: {
     client: null,
     loading: false,
     error: '',
-    installHelp: false,
+    mode: 'register',
     channel: null,
-    form: { first_name: '', last_name: '', country: 'MA', phone: '', email: '' }
+    form: { first_name: '', last_name: '', country: 'MA', phone: '', email: '' },
+    recovery: { name: '', email: '' }
   },
   payer: { names: ['Lina', 'Yassine', 'Sarah'], display: 'Prêt ?', spinning: false, winner: '', timer: null },
   combo: {
@@ -609,10 +609,12 @@ function logoHTML() {
   return '<a class="logo" href="#top" aria-label="Juvia, retour en haut">juvia<span>.</span></a>';
 }
 
+var TEST_VIDEO_POSTER_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/Screenshot%202026-09-26%20at%2016.36.44.png';
+var TEST_VIDEO_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/%5B%40download_it_bot%201080p%5D%20Video%20by%20juvia%20oujda.mp4';
+
 function videoCardHTML(dish, index, catIndex) {
-  var src = index === 2 ? 'images/juvia-dessert.jpg' : 'images/juvia-food.jpg';
   return '<button class="video-card crop-' + index + '" data-dish-cat="' + catIndex + '" data-dish-name="' + esc(dish.n) + '" aria-label="Voir la vidéo de ' + esc(dish.n) + '">' +
-    '<img src="' + src + '" alt=""/>' +
+    '<video class="video-card-media" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop aria-hidden="true"></video>' +
     '<span class="video-play">' + ic('play', 15, 'fill="currentColor"') + '</span>' +
     '<span class="video-duration">0:' + (12 + index * 3) + '</span>' +
     '<b>' + esc(dish.n) + '</b>' +
@@ -760,8 +762,7 @@ function openVideoModal(dish) {
       '<button class="modal-bg" id="video-bg"></button>' +
       '<div class="modal-card">' +
         '<button class="modal-close" id="video-close">' + ic('x', 18) + '</button>' +
-        '<div class="modal-image"><img src="images/juvia-food.jpg" alt="' + esc(dish.n) + '"/>' +
-          '<span>' + ic('play', 24, 'fill="currentColor"') + '</span></div>' +
+        '<div class="modal-image"><video class="modal-video" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop controls aria-label="Lire la vidéo de ' + esc(dish.n) + '"></video></div>' +
         '<span class="modal-kicker">Dans les coulisses</span>' +
         '<h2>' + esc(dish.n) + '</h2>' +
         '<p>' + esc(dish.d) + '</p>' +
@@ -1173,7 +1174,6 @@ function openPass() {
   appState.passOpen = true;
   document.body.style.overflow = 'hidden';
   appState.pass.error = '';
-  appState.pass.installHelp = false;
   renderPassModal();
   var storedId = safeStorage.get('localStorage', PASS_STORAGE_KEY);
   if (storedId && !appState.pass.client) fetchPassClient(storedId);
@@ -1260,13 +1260,82 @@ function passViewHTML(client) {
         '<span>Présentez ce code à la caisse</span></div>' +
       '<div class="pass-number">N° ' + esc(String(client.id).slice(0, 8).toUpperCase()) + '</div>' +
     '</div>' +
-    '<button class="install-pass" id="pass-install">' + ic('smartphone', 17) + ' Ajouter à l’écran d’accueil</button>' +
-    (appState.pass.installHelp ?
-      '<div class="install-help"><b>Installer votre Juvia Pass</b>' +
-      '<p><strong>iPhone :</strong> touchez Partager, puis « Sur l’écran d’accueil ».<br/>' +
-      '<strong>Android :</strong> ouvrez le menu ⋮, puis « Installer l’application ».</p></div>' : '') +
-    '<button class="pass-forget" id="pass-forget">Ce n’est pas votre carte ?</button>' +
+    '<button class="download-pass" id="pass-download" type="button">' + ic('download', 17) + ' Télécharger mon Pass</button>' +
+    '<button class="pass-forget" id="pass-forget" type="button">Ce n’est pas votre carte ?</button>' +
   '</div>';
+}
+
+function passFileName(client) {
+  var name = String(clientName(client)).trim();
+  // Keep Latin accents and Arabic names readable in the downloaded filename.
+  name = name.replace(/[^\w\u00c0-\u024f\u0600-\u06ff]+/gi, '-').replace(/^-+|-+$/g, '');
+  return 'Juvia-Pass-' + (name || 'Client') + '.png';
+}
+
+function canvasPNGBlob(canvas) {
+  return new Promise(function (resolve, reject) {
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob(function (blob) {
+        if (blob) resolve(blob);
+        else reject(new Error('PNG export failed'));
+      }, 'image/png');
+      return;
+    }
+    try {
+      var data = canvas.toDataURL('image/png');
+      var binary = atob(data.split(',')[1]);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      resolve(new Blob([bytes], { type: 'image/png' }));
+    } catch (error) { reject(error); }
+  });
+}
+
+function downloadPassImage() {
+  var card = document.querySelector('.loyalty-card');
+  var button = document.getElementById('pass-download');
+  if (!card || !button || !appState.pass.client) return;
+  if (typeof window.html2canvas !== 'function') {
+    return setPassError('Le téléchargement de votre pass est momentanément indisponible.');
+  }
+
+  var originalHTML = button.innerHTML;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  button.innerHTML = ic('loader-circle', 17) + ' Préparation…';
+  refreshIcons();
+
+  var fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+  Promise.resolve(fontsReady).catch(function () {}).then(function () {
+    return window.html2canvas(card, {
+      scale: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
+      useCORS: true,
+      backgroundColor: '#f4eee3',
+      logging: false,
+      imageTimeout: 15000
+    });
+  }).then(canvasPNGBlob).then(function (blob) {
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = passFileName(appState.pass.client);
+    link.rel = 'noopener';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(function () {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }, 1000);
+  }).catch(function (error) {
+    console.error('Juvia Pass image download:', error);
+    setPassError('Impossible de télécharger votre pass. Réessayez.');
+  }).finally(function () {
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    button.innerHTML = originalHTML;
+    refreshIcons();
+  });
 }
 
 function passFormHTML() {
@@ -1295,8 +1364,29 @@ function passFormHTML() {
       (appState.pass.loading ? ic('loader-circle', 17) : ic('crown', 17)) +
       (appState.pass.loading ? 'Chargement…' : 'Créer mon Juvia Pass') +
     '</button>' +
-    '<button type="button" class="recover-pass" id="pass-recover" ' + (appState.pass.loading ? 'disabled' : '') + '>Déjà membre ? Retrouver ma carte avec mon téléphone</button>' +
+    '<button type="button" class="recover-pass" id="pass-recover">Déjà un pass ? Retrouver ma carte avec mon nom ou e-mail</button>' +
     '<small>En continuant, vous acceptez de recevoir les avantages Juvia.</small>' +
+  '</form>';
+}
+
+function passRecoveryHTML() {
+  var recovery = appState.pass.recovery;
+  return '<form class="pass-register pass-recovery" id="pass-recovery-form" novalidate>' +
+    '<div class="register-icon">' + ic('search', 25) + '</div>' +
+    '<span>Déjà un pass ?</span>' +
+    '<h3>Retrouver ma carte.</h3>' +
+    '<p>Utilisez le nom enregistré ou l’adresse e-mail de votre pass. Votre carte et son QR code s’afficheront immédiatement.</p>' +
+    '<label><span>Nom complet</span><div>' + ic('user-round', 16) +
+      '<input id="pass-recovery-name" value="' + esc(recovery.name) + '" placeholder="Prénom et nom" autocomplete="name"/></div></label>' +
+    '<div class="pass-recovery-or"><span>ou</span></div>' +
+    '<label><span>Adresse E-mail</span><div>' + ic('mail', 16) +
+      '<input id="pass-recovery-email" type="email" value="' + esc(recovery.email) + '" placeholder="vous@exemple.com" autocomplete="email"/></div></label>' +
+    (appState.pass.error ? '<div class="pass-error">' + esc(appState.pass.error) + '</div>' : '') +
+    '<button class="create-pass" id="pass-recover-submit" type="submit" ' + (appState.pass.loading ? 'disabled' : '') + '>' +
+      (appState.pass.loading ? ic('loader-circle', 17) : ic('search', 17)) +
+      (appState.pass.loading ? 'Recherche…' : 'Retrouver mon Pass') +
+    '</button>' +
+    '<button type="button" class="recover-pass" id="pass-back-register">Créer un nouveau Pass</button>' +
   '</form>';
 }
 
@@ -1308,19 +1398,21 @@ function renderPassModalBody() {
   var p = appState.pass;
   if (p.loading && !p.client) body.innerHTML = passLoadingHTML();
   else if (p.client) body.innerHTML = passViewHTML(p.client);
+  else if (p.mode === 'recover') body.innerHTML = passRecoveryHTML();
   else body.innerHTML = passFormHTML();
   refreshIcons();
 
   if (p.client) {
-    var installBtn = document.getElementById('pass-install');
-    if (installBtn) installBtn.addEventListener('click', installPassApp);
+    var downloadBtn = document.getElementById('pass-download');
+    if (downloadBtn) downloadBtn.addEventListener('click', downloadPassImage);
     var forgetBtn = document.getElementById('pass-forget');
     if (forgetBtn) forgetBtn.addEventListener('click', function () {
       safeStorage.remove('localStorage', PASS_STORAGE_KEY);
       appState.pass.client = null;
       appState.pass.error = '';
-      appState.pass.installHelp = false;
+      appState.pass.mode = 'register';
       appState.pass.form = { first_name: '', last_name: '', country: 'MA', phone: '', email: '' };
+      appState.pass.recovery = { name: '', email: '' };
       if (appState.pass.channel && supabase) {
         try { supabase.removeChannel(appState.pass.channel); } catch (e) {}
         appState.pass.channel = null;
@@ -1328,6 +1420,21 @@ function renderPassModalBody() {
       renderPassModalBody();
     });
   } else if (!(p.loading && !p.client)) {
+    var recoveryForm = document.getElementById('pass-recovery-form');
+    if (recoveryForm) {
+      recoveryForm.addEventListener('submit', recoverPass);
+      var recoveryName = document.getElementById('pass-recovery-name');
+      var recoveryEmail = document.getElementById('pass-recovery-email');
+      recoveryName.addEventListener('input', function () { appState.pass.recovery.name = recoveryName.value; });
+      recoveryEmail.addEventListener('input', function () { appState.pass.recovery.email = recoveryEmail.value; });
+      document.getElementById('pass-back-register').addEventListener('click', function () {
+        appState.pass.mode = 'register';
+        appState.pass.error = '';
+        renderPassModalBody();
+      });
+      return;
+    }
+
     var form = document.getElementById('pass-form');
     if (form) {
       form.addEventListener('submit', registerPass);
@@ -1349,15 +1456,19 @@ function renderPassModalBody() {
         updateCountryTrigger();
       });
       document.getElementById('country-trigger-btn').addEventListener('click', toggleCountryDropdown);
-      document.getElementById('pass-recover').addEventListener('click', recoverPassByPhone);
+      document.getElementById('pass-recover').addEventListener('click', function () {
+        appState.pass.mode = 'recover';
+        appState.pass.error = '';
+        renderPassModalBody();
+      });
     }
   }
 }
 
 function setPassError(message) {
   appState.pass.error = message;
-  // Re-render only if the form is currently displayed (to keep input focus intact, patch in place)
-  var form = document.getElementById('pass-form');
+  // Patch the visible view in place so validation does not steal input focus.
+  var form = document.getElementById('pass-form') || document.getElementById('pass-recovery-form');
   if (form) {
     var err = form.querySelector('.pass-error');
     if (err) err.textContent = message;
@@ -1365,7 +1476,19 @@ function setPassError(message) {
       var div = document.createElement('div');
       div.className = 'pass-error';
       div.textContent = message;
-      form.insertBefore(div, document.getElementById('pass-submit'));
+      form.insertBefore(div, document.getElementById('pass-submit') || document.getElementById('pass-recover-submit'));
+    }
+    return;
+  }
+  var passView = document.querySelector('.pass-view');
+  if (passView) {
+    var viewError = passView.querySelector('.pass-error');
+    if (viewError) viewError.textContent = message;
+    else {
+      viewError = document.createElement('div');
+      viewError.className = 'pass-error';
+      viewError.textContent = message;
+      passView.insertBefore(viewError, document.getElementById('pass-download') || document.getElementById('pass-forget'));
     }
   }
 }
@@ -1410,21 +1533,78 @@ function registerPass(event) {
   })();
 }
 
-function recoverPassByPhone() {
-  var f = appState.pass.form;
-  var national = cleanNationalPhone(f.phone, f.country);
-  if (national.length < 4) return setPassError('Saisissez votre numéro pour retrouver votre carte.');
+function findClientByNameOrEmail(name, email) {
+  var normalizedName = String(name || '').trim().replace(/\s+/g, ' ');
+  var normalizedEmail = String(email || '').trim().toLowerCase();
+
+  function resultFrom(response) {
+    return { data: (response.data && response.data[0]) || null, error: response.error };
+  }
+  function lookupByEmail() {
+    return supabase.from('clients').select('*').ilike('email', normalizedEmail).limit(1).then(resultFrom);
+  }
+  function lookupByNameParts() {
+    var parts = normalizedName.split(' ').filter(Boolean);
+    if (!parts.length) return Promise.resolve({ data: null, error: null });
+    var first = parts.shift();
+    var last = parts.join(' ');
+    if (last) {
+      return supabase.from('clients').select('*')
+        .ilike('first_name', first).ilike('last_name', last).limit(1).then(function (response) {
+          var result = resultFrom(response);
+          if (result.data || result.error) return result;
+          return supabase.from('clients').select('*')
+            .ilike('first_name', last).ilike('last_name', first).limit(1).then(resultFrom);
+        });
+    }
+    return supabase.from('clients').select('*').ilike('first_name', first).limit(1).then(function (response) {
+      var result = resultFrom(response);
+      if (result.data || result.error) return result;
+      return supabase.from('clients').select('*').ilike('last_name', first).limit(1).then(resultFrom);
+    });
+  }
+  function lookupByName() {
+    if (!normalizedName) return Promise.resolve({ data: null, error: null });
+    // The name column is written for new passes; the first/last fallback also
+    // supports existing records created before that column was introduced.
+    return supabase.from('clients').select('*').ilike('name', normalizedName).limit(1).then(function (response) {
+      var result = resultFrom(response);
+      if (result.data) return result;
+      return lookupByNameParts();
+    });
+  }
+
+  if (normalizedEmail) {
+    return lookupByEmail().then(function (result) {
+      return result.data || !normalizedName ? result : lookupByName();
+    });
+  }
+  return lookupByName();
+}
+
+function recoverPass(event) {
+  event.preventDefault();
+  var recovery = appState.pass.recovery;
+  var name = recovery.name.trim();
+  var email = recovery.email.trim().toLowerCase();
+  if (!name && !email) return setPassError('Saisissez votre nom ou votre adresse e-mail pour retrouver votre carte.');
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) return setPassError('Vérifiez votre adresse e-mail.');
   if (!supabase) return setPassError('Le service fidélité est momentanément indisponible.');
+
   appState.pass.loading = true;
   appState.pass.error = '';
-  var recoverBtn = document.getElementById('pass-recover');
-  if (recoverBtn) recoverBtn.disabled = true;
+  var recoverBtn = document.getElementById('pass-recover-submit');
+  if (recoverBtn) {
+    recoverBtn.disabled = true;
+    recoverBtn.innerHTML = ic('loader-circle', 17) + ' Recherche…';
+    refreshIcons();
+  }
   (async function () {
     try {
-      var lookup = await findClientByPhone(national, f.country);
+      var lookup = await findClientByNameOrEmail(name, email);
       if (lookup.error) throw lookup.error;
       if (!lookup.data) {
-        appState.pass.error = 'Aucune carte associée à ce numéro. Complétez le formulaire pour la créer.';
+        appState.pass.error = 'Aucune carte trouvée avec ces informations. Vérifiez votre nom ou e-mail.';
         return;
       }
       safeStorage.set('localStorage', PASS_STORAGE_KEY, lookup.data.id);
@@ -1438,20 +1618,6 @@ function recoverPassByPhone() {
       subscribePassRealtime();
     }
   })();
-}
-
-function installPassApp() {
-  if (appState.installPrompt) {
-    (async function () {
-      try {
-        await appState.installPrompt.prompt();
-        await appState.installPrompt.userChoice;
-      } catch (e) {}
-    })();
-    return;
-  }
-  appState.pass.installHelp = true;
-  renderPassModalBody();
 }
 
 /* ============================================================
@@ -2189,11 +2355,6 @@ function showErrorFallback() {
 /* ------------------------------------------------------------
    Boot
    ------------------------------------------------------------ */
-window.addEventListener('beforeinstallprompt', function (event) {
-  event.preventDefault();
-  appState.installPrompt = event;
-});
-
 // Always release the camera when leaving or hiding the staff page.
 window.addEventListener('pagehide', destroyStaffScanner);
 window.addEventListener('beforeunload', destroyStaffScanner);
