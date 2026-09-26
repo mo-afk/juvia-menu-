@@ -31,25 +31,12 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <!--
-    Espace Staff layout (rendered by js/app.js):
-      Mobile (<1024px)  : single stacked column — intro, scanning
-                          square (aspect-ratio 1), manual UUID entry.
-      Desktop (≥1024px) : two-column dashboard — scanning square left
-                          (≤560px), side card right (manual entry,
-                          status, tips / billing form). See the
-          "Staff page — desktop responsiveness" block in css/style.css.
-  -->
-  <div id="app"></div>
+  <!-- Mobile: stacked scanner and manual entry; desktop: 1280px dashboard. -->
+  <div id="app" class="staff-app"></div>
 
-  <!-- QR decoding engine.
-       Camera access (getUserMedia / WebRTC) is only available in a
-       secure context: serve this page over HTTPS (Vercel) or open it
-       at http://localhost / http://127.0.0.1 with Live Server.
-       js/app.js pre-flights getUserMedia and, if this library fails to
-       load, falls back to the raw feed + manual UUID entry. -->
-  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/dist/html5-qrcode.min.js"
-          onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/html5-qrcode@2.3.8/dist/html5-qrcode.min.js';s.onload=function(){document.dispatchEvent(new Event('juvia:qrlib'));};document.head.appendChild(s);"></script>
+  <!-- Pinned, same-origin decoder: no CDN dependency or asynchronous loading race.
+       Camera access requires HTTPS (or localhost during development). -->
+  <script src="js/vendor/html5-qrcode.min.js"></script>
 
   <!-- App -->
   <script src="js/app.js"></script>

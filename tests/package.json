@@ -1,0 +1,11 @@
+{
+  "name": "juvia-browser-tests",
+  "private": true,
+  "scripts": {
+    "test": "node browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "qrcode": "1.5.4"
+  }
+}

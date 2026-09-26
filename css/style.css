@@ -34,12 +34,12 @@
 .scanner-shell{padding:0;border:0;background:transparent}
 .scan-stage{position:relative;width:100%;aspect-ratio:1/1;border-radius:14px;overflow:hidden;background:radial-gradient(130% 130% at 50% 0%,#2c4f4b 0%,#102723 55%,#0a1c1a 100%);border:1px solid #cfb578;box-shadow:0 18px 42px #13291f2e,inset 0 0 0 1px #d0b57f22}
 .scan-stage.is-live{border-color:#e2c179;box-shadow:0 18px 46px #13291f40,0 0 0 1px #e2c17936}
-/* html5-qrcode sets inline position:relative on the reader — force our
-   absolute pinning so the injected <video> always fills the square. */
-.scan-reader{position:absolute!important;inset:0;z-index:1}
-.scan-reader video{width:100%!important;height:100%!important;object-fit:cover;display:block;background:#0a1c1a}
+/* Preserve the video's native aspect ratio: object-fit:cover in a forced
+   square makes the visible QR differ from the pixels sampled by the decoder. */
+.scan-reader{position:absolute!important;left:0;right:0;top:50%;transform:translateY(-50%);z-index:1}
+.scan-reader video{width:100%!important;height:auto!important;display:block;background:#0a1c1a}
 .scan-reader>div{display:none!important}
-.scan-overlay{position:absolute;inset:0;z-index:2;pointer-events:none}
+.scan-overlay{position:absolute;left:50%;top:50%;width:var(--scan-box,70%);height:var(--scan-box,70%);transform:translate(-50%,-50%);z-index:2;pointer-events:none}
 .scan-overlay[hidden]{display:none!important}
 .scan-corner{position:absolute;width:44px;height:44px;border:3px solid #f2cb7c;filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
 .scan-corner.tl{top:15px;left:15px;border-right:0;border-bottom:0;border-top-left-radius:9px}
@@ -93,7 +93,7 @@
 @media(min-width:1024px){
   /* Shell & header */
   .staff-page{background:linear-gradient(180deg,#efe9dd 0%,var(--ivory) 300px)}
-  .staff-header{height:82px;padding:0 max(28px,calc(50vw - 532px));box-shadow:0 6px 24px #17302f18}
+  .staff-header{height:82px;padding:0 max(5vw,calc((100vw - 1280px)/2));box-shadow:0 6px 24px #17302f18}
   .staff-header .logo{font-size:34px}
   .staff-header>div{gap:1px}
   .staff-header>div span{font-size:8px;letter-spacing:2px}
@@ -102,7 +102,7 @@
   .staff-header>button svg{width:16px}
 
   /* Content canvas */
-  .staff-content{max-width:1120px;padding:56px 32px 90px}
+  .staff-content{width:90%;max-width:1280px;padding:40px 0 56px}
   .staff-intro{gap:16px;margin-bottom:32px}
   .staff-intro>span{width:58px;height:58px}
   .staff-intro svg{width:24px}
@@ -110,8 +110,9 @@
   .staff-intro p{font-size:12px;margin-top:5px}
 
   /* Two-column grid: scan square | side card */
-  .staff-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr);gap:34px;align-items:start}
-  .staff-grid-main .scanner-shell{max-width:560px;margin:0 auto}
+  .staff-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:32px;align-items:start}
+  .staff-grid> *{min-width:0}
+  .staff-grid-main .scanner-shell{width:100%;max-width:none}
   .staff-grid-side{position:sticky;top:24px}
 
   /* Side card (manual entry / billing) */
@@ -188,3 +189,51 @@
   .staff-login>small{font-size:10px}
   .staff-back{top:26px;left:28px;font-size:10px}
 }
+
+/* The gold frame matches the decoder's centered ROI at every resolution. */
+.scan-corner.tl{top:0;left:0}
+.scan-corner.tr{top:0;right:0}
+.scan-corner.bl{bottom:0;left:0}
+.scan-corner.br{bottom:0;right:0}
+.scan-hint{bottom:-42px;letter-spacing:.8px}
+.scan-success{background:radial-gradient(ellipse at top,#245e48,#102e25)}
+.scan-success-icon{color:#9ce4b9}
+.scan-success-icon svg{width:56px;height:56px}
+.scan-success h3{color:#b8f2cf}
+.client-found>small{overflow-wrap:anywhere}
+
+/* Wide menu canvas; retain the compact, swipeable mobile design below 1024px. */
+@media(min-width:1024px){
+  .menu-page{--menu-width:1400px;--menu-gutter:max(5vw,calc((100vw - var(--menu-width))/2))}
+  .menu-page .topbar{height:82px;padding:0 var(--menu-gutter)}
+  .menu-page .brandline span{font-size:11px}
+  .menu-page .brandline small{font-size:10px}
+  .menu-page .top-game{height:44px;padding:0 20px;font-size:13px}
+  .menu-page .welcome{min-height:240px;padding:40px var(--menu-gutter)}
+  .menu-page .welcome>div>span{font-size:12px}
+  .menu-page .welcome h1{font-size:56px}
+  .menu-page .welcome:after{right:var(--menu-gutter);font-size:300px}
+  .menu-page .table-pill{font-size:12px}
+  .menu-page .category-nav{padding:0 var(--menu-gutter);justify-content:flex-start}
+  .menu-page .category-nav button{flex:1 0 auto;padding-left:14px;padding-right:14px;font-size:13px}
+  .menu-page .category-nav button span{font-size:9px}
+  .menu-page .menu-content{width:90%;max-width:var(--menu-width);padding:0}
+  .menu-page .menu-category{padding:48px 0 40px}
+  .menu-page .section-title h2{font-size:36px}
+  .menu-page .section-title span{font-size:12px}
+  .menu-page .section-title p{font-size:12px;max-width:220px}
+  .menu-page .featured{margin:0 0 24px;border:1px solid #cfe8f0;border-radius:8px}
+  .menu-page .featured-label{font-size:10px}
+  .menu-page .video-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+  .menu-page .video-card{width:100%;height:clamp(190px,18vw,260px)}
+  .menu-page .video-card b{font-size:20px}
+  .menu-page .dish-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line)}
+  .menu-page .dish{min-width:0;border:0;padding:24px;background:var(--paper)}
+  .menu-page .dish h3{font-size:21px}
+  .menu-page .dish p{font-size:13px;max-width:none}
+  .menu-page .dish strong{font-size:18px}
+  .menu-page .dish strong small{font-size:10px}
+  .menu-page .chef{font-size:8px!important}
+  .menu-page .floating-game{right:24px}
+}
+@media(prefers-reduced-motion:reduce){.scan-laser{animation:none}}
