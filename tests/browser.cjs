@@ -1,0 +1,210 @@
+// Browser regression checks: real QR decoder + synthetic camera; no live database writes.
+const { chromium } = require("playwright");
+const QRCode = require("qrcode");
+const assert = require("node:assert/strict");
+(async () => {
+  const baseURL = process.env.BASE_URL || "http://localhost:8000";
+  const browser = await chromium.launch({
+    executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined,
+    headless: true,
+  });
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const uuid = "123e4567-e89b-42d3-a456-426614174000";
+  const qr = await QRCode.toDataURL(uuid, { width: 420, margin: 4 });
+  await ctx.route("**/*", async (route) => {
+    if (new URL(route.request().url()).origin !== new URL(baseURL).origin)
+      return route.abort();
+    return route.continue();
+  });
+  await ctx.addInitScript(
+    ({ qr, uuid }) => {
+      sessionStorage.setItem("juvia_staff_verified_v2", "1");
+      window.lookups = [];
+      window.streams = [];
+      window.supabase = {
+        createClient: () => ({
+          from: () => ({
+            select: () => ({
+              eq: (key, id) => ({
+                single: async () => {
+                  window.lookups.push(id);
+                  await new Promise((r) => setTimeout(r, 450));
+                  return window.failLookup
+                    ? { error: { message: "not found" } }
+                    : {
+                        data: {
+                          id: uuid,
+                          first_name: "Test",
+                          last_name: "Member",
+                          points: 20,
+                        },
+                      };
+                },
+              }),
+            }),
+          }),
+        }),
+      };
+      navigator.mediaDevices.getUserMedia = async () => {
+        if (window.cameraError) throw { name: window.cameraError };
+        if (window.permissionWait)
+          await new Promise((r) => (window.allowCamera = r));
+        const canvas = document.createElement("canvas");
+        canvas.width = 1280;
+        canvas.height = 720;
+        const c = canvas.getContext("2d");
+        const img = new Image();
+        img.src = qr;
+        await img.decode();
+        const draw = () => {
+          c.fillStyle = "white";
+          c.fillRect(0, 0, 1280, 720);
+          if (!window.blankCamera) c.drawImage(img, 430, 150, 420, 420);
+        };
+        draw();
+        const interval = setInterval(draw, 50);
+        const stream = canvas.captureStream(20);
+        window.streams.push(stream);
+        stream.getTracks().forEach((track) => {
+          const stop = track.stop.bind(track);
+          track.stop = () => {
+            stop();
+            clearInterval(interval);
+          };
+        });
+        return stream;
+      };
+      navigator.mediaDevices.enumerateDevices = async () => [
+        { kind: "videoinput", deviceId: "test-camera", label: "Back camera" },
+      ];
+    },
+    { qr, uuid },
+  );
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(e.message));
+  for (const width of [320, 390, 768, 1024, 1440, 1920]) {
+    await p.setViewportSize({ width, height: 1000 });
+    await p.goto(baseURL + "/index.html");
+    await p.waitForSelector(".menu-content");
+    const menu = await p.evaluate(() => ({
+      width: document.querySelector(".menu-content").getBoundingClientRect()
+        .width,
+      overflow: document.documentElement.scrollWidth > innerWidth,
+      cols: getComputedStyle(document.querySelector(".dish-list"))
+        .gridTemplateColumns,
+    }));
+    assert.equal(menu.overflow, false, `menu overflow ${width}`);
+    if (width >= 1024) {
+      assert.ok(menu.width >= Math.min(width * 0.89, 1400));
+      assert.equal(menu.cols.split(" ").length, 2);
+    }
+    await p.goto(baseURL + "/staff-scan.html");
+    await p.waitForSelector("#staff-start-cam");
+    const staff = await p.evaluate(() => ({
+      width: document.querySelector(".staff-content").getBoundingClientRect()
+        .width,
+      overflow: document.documentElement.scrollWidth > innerWidth,
+      cols: getComputedStyle(document.querySelector(".staff-grid"))
+        .gridTemplateColumns,
+    }));
+    assert.equal(staff.overflow, false, `staff overflow ${width}`);
+    if (width >= 1024) {
+      assert.ok(staff.width >= Math.min(width * 0.89, 1280));
+      assert.equal(staff.cols.split(" ").length, 2);
+    }
+    console.log("layout", width, menu, staff);
+  }
+  for (const width of [320, 390, 1440]) {
+    await p.setViewportSize({ width, height: 1000 });
+    await p.goto(baseURL + "/staff-scan.html");
+    await p.click("#staff-start-cam");
+    await p.waitForSelector(".scan-success", { timeout: 15000 });
+    await p.waitForSelector(".client-found");
+    assert.deepEqual(await p.evaluate(() => lookups), [uuid]);
+    assert.equal(
+      await p.evaluate(() =>
+        streams.every((s) =>
+          s.getTracks().every((t) => t.readyState === "ended"),
+        ),
+      ),
+      true,
+    );
+    console.log("real QR decoded and camera stopped", width);
+  }
+  await p.click("#staff-scan-another");
+  await p.waitForSelector(".scan-success");
+  await p.waitForSelector(".client-found");
+  assert.deepEqual(await p.evaluate(() => lookups), [uuid, uuid]);
+  console.log("scan another pass passed");
+  await p.goto(baseURL + "/staff-scan.html");
+  await p.evaluate(() => (window.failLookup = true));
+  await p.click("#staff-start-cam");
+  await p.waitForSelector("#staff-retry-cam");
+  assert.match(
+    await p.locator(".scan-cover h3").textContent(),
+    /Pass introuvable/,
+  );
+  console.log("unknown member retry passed");
+  await p.goto(baseURL + "/staff-scan.html");
+  await p.evaluate(() => (window.cameraError = "NotAllowedError"));
+  await p.click("#staff-start-cam");
+  await p.waitForSelector("#staff-retry-cam");
+  assert.match(await p.locator(".scan-cover h3").textContent(), /Permission/);
+  console.log("permission denied passed");
+  await p.goto(baseURL + "/staff-scan.html");
+  await p.evaluate(() => (window.permissionWait = true));
+  await p.click("#staff-start-cam");
+  await p.waitForFunction(() => !!window.allowCamera);
+  await p.click("#staff-lock-btn");
+  await p.evaluate(() => window.allowCamera());
+  await p.waitForFunction(
+    () =>
+      streams.length > 0 &&
+      streams.every((s) =>
+        s.getTracks().every((t) => t.readyState === "ended"),
+      ),
+  );
+  assert.equal(await p.locator("#staff-pin-form").count(), 1);
+  console.log("logout during permissions passed");
+  await p.goto(baseURL + "/staff-scan.html");
+  await p.evaluate(() => (window.blankCamera = true));
+  await p.click("#staff-start-cam");
+  await p.waitForSelector("#staff-stop-cam");
+  await p.click("#staff-stop-cam");
+  await p.waitForSelector("#staff-start-cam");
+  await p.waitForFunction(() =>
+    streams.every((s) => s.getTracks().every((t) => t.readyState === "ended")),
+  );
+  await p.evaluate(() => (window.blankCamera = false));
+  await p.click("#staff-start-cam");
+  await p.waitForSelector(".client-found");
+  console.log("stop and restart passed");
+  await p.goto(baseURL + "/staff-scan.html");
+  await p.fill("#staff-manual-input", "juvia:" + uuid);
+  await p.click("#staff-manual-btn");
+  await p.waitForSelector(".client-found");
+  assert.deepEqual(await p.evaluate(() => lookups), [uuid]);
+  console.log("manual prefixed UUID passed");
+  await ctx.route("**/js/vendor/html5-qrcode.min.js", (route) => route.abort());
+  await p.goto(baseURL + "/staff-scan.html");
+  await p.click("#staff-start-cam");
+  await p.waitForSelector(".scan-note.warn");
+  await p.fill("#staff-manual-input", uuid);
+  await p.click("#staff-manual-btn");
+  await p.waitForSelector(".client-found");
+  assert.equal(
+    await p.evaluate(() =>
+      streams.every((s) =>
+        s.getTracks().every((t) => t.readyState === "ended"),
+      ),
+    ),
+    true,
+  );
+  console.log("missing decoder manual fallback passed");
+  assert.deepEqual(errors, []);
+  await browser.close();
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
