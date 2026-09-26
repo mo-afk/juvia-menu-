@@ -26,3 +26,165 @@
 
 /* International phone selector */
 .international-phone-label{position:relative;z-index:8}.international-phone-label>div{padding-left:5px!important}.country-select{position:relative;align-self:stretch;display:flex;align-items:center;flex:0 0 auto}.country-trigger{height:38px;min-width:92px;padding:0 8px;border:0;border-right:1px solid #ddd4c5;background:#f7f1e6;border-radius:4px 0 0 4px;display:flex;align-items:center;gap:5px;cursor:pointer}.country-trigger>span{font-size:16px!important;line-height:1;margin:0!important;letter-spacing:0!important}.country-trigger b{font-size:9px;color:var(--deep)}.country-trigger svg{width:12px!important;margin:0!important;color:#8f8d86;transform:rotate(90deg);transition:transform .2s}.country-trigger[aria-expanded=true] svg{transform:rotate(-90deg)}.country-dropdown{position:absolute;z-index:50;left:-5px;top:47px;width:min(320px,calc(100vw - 58px));padding:7px;border:1px solid #cfb578;border-radius:7px;background:#fffdf8;box-shadow:0 18px 45px #172b2c38}.country-search{height:41px;border:1px solid #e0d8ca;border-radius:4px;background:#fff;display:flex}.country-search input{width:100%;padding:0 10px!important;font-size:10px!important}.country-options{max-height:225px;overflow-y:auto;margin-top:6px;overscroll-behavior:contain}.country-options>button{width:100%;height:39px;padding:0 8px;border:0;border-bottom:1px solid #eee9df;background:transparent;display:grid;grid-template-columns:25px 1fr auto;align-items:center;text-align:left;gap:7px;cursor:pointer}.country-options>button:hover,.country-options>button.selected{background:#eaf4f3}.country-options>button span{font-size:16px!important;margin:0!important;letter-spacing:0!important}.country-options>button b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;font-weight:500}.country-options>button small{font-size:8px;color:var(--teal)}.country-options>p{font-size:9px;color:#999;text-align:center}.international-phone-label>div>input{padding-left:11px}.pass-register label:focus-within{z-index:12}
+
+/* ============================================================
+   Staff scanner v2 — camera-first scanning square
+   (secure-context getUserMedia + styled live feed)
+   ============================================================ */
+.scanner-shell{padding:0;border:0;background:transparent}
+.scan-stage{position:relative;width:100%;aspect-ratio:1/1;border-radius:14px;overflow:hidden;background:radial-gradient(130% 130% at 50% 0%,#2c4f4b 0%,#102723 55%,#0a1c1a 100%);border:1px solid #cfb578;box-shadow:0 18px 42px #13291f2e,inset 0 0 0 1px #d0b57f22}
+.scan-stage.is-live{border-color:#e2c179;box-shadow:0 18px 46px #13291f40,0 0 0 1px #e2c17936}
+/* html5-qrcode sets inline position:relative on the reader — force our
+   absolute pinning so the injected <video> always fills the square. */
+.scan-reader{position:absolute!important;inset:0;z-index:1}
+.scan-reader video{width:100%!important;height:100%!important;object-fit:cover;display:block;background:#0a1c1a}
+.scan-reader>div{display:none!important}
+.scan-overlay{position:absolute;inset:0;z-index:2;pointer-events:none}
+.scan-overlay[hidden]{display:none!important}
+.scan-corner{position:absolute;width:44px;height:44px;border:3px solid #f2cb7c;filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+.scan-corner.tl{top:15px;left:15px;border-right:0;border-bottom:0;border-top-left-radius:9px}
+.scan-corner.tr{top:15px;right:15px;border-left:0;border-bottom:0;border-top-right-radius:9px}
+.scan-corner.bl{bottom:15px;left:15px;border-right:0;border-top:0;border-bottom-left-radius:9px}
+.scan-corner.br{bottom:15px;right:15px;border-left:0;border-top:0;border-bottom-right-radius:9px}
+.scan-laser{position:absolute;left:11%;right:11%;top:11%;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,#ffd98a 18%,#ffe9bd 50%,#ffd98a 82%,transparent);box-shadow:0 0 12px 2px rgba(242,203,124,.55);animation:scanLaser 2.3s ease-in-out infinite}
+.scan-hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:8px 13px;border-radius:30px;background:rgba(7,21,20,.88);color:#ffe9bd;font-size:7px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;white-space:nowrap}
+.scan-hint svg{width:12px;height:12px;flex:0 0 12px}
+.scan-cover{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;color:#fff;background:radial-gradient(120% 120% at 50% 0%,rgba(43,78,73,.52),rgba(8,22,20,.93) 78%)}
+.scan-cover h3{font-family:var(--serif);font-size:20px;font-weight:500;margin:4px 0 0;color:#fdf6e7}
+.scan-cover p{margin:0;font-size:9px;line-height:1.65;color:#ffffffb3;max-width:310px}
+.scan-idle-icon{width:60px;height:60px;border-radius:50%;border:1px solid rgba(217,182,111,.55);background:rgba(217,182,111,.12);color:#f2cb7c;display:grid;place-items:center;box-shadow:0 0 0 9px rgba(217,182,111,.09)}
+.scan-idle-icon svg{width:30px;height:30px}
+.scan-error-icon{width:56px;height:56px;border-radius:50%;border:1px solid rgba(238,140,131,.6);background:rgba(238,140,131,.13);color:#f2a49d;display:grid;place-items:center;box-shadow:0 0 0 9px rgba(238,140,131,.08)}
+.scan-error-icon svg{width:26px;height:26px}
+.scan-loader{width:42px;height:42px;border-radius:50%;border:3px solid rgba(217,182,111,.22);border-top-color:#f2cb7c;animation:spin .9s linear infinite}
+.scan-primary{margin-top:7px;min-height:44px;padding:0 22px;border:1px solid #d9b66f;border-radius:6px;background:linear-gradient(135deg,#ecc476,#c8965a);color:#17302f;font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;display:inline-flex;align-items:center;gap:8px;box-shadow:0 5px 16px rgba(200,156,86,.35);cursor:pointer}
+.scan-primary svg{width:15px;height:15px}
+.scan-primary:active{transform:translateY(1px)}
+.scan-cover-warn{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:3px;font-size:7px;letter-spacing:.4px;color:#f4c16f}
+.scan-cover-warn svg{width:11px;height:11px;flex:0 0 11px}
+.scanner-actions{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:13px}
+.scanner-actions:empty{display:none}
+.scan-ghost{min-height:40px;padding:0 18px;border:1px solid #d8d1c5;border-radius:6px;background:#fff;color:#6d6a63;font-size:8px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;display:inline-flex;align-items:center;gap:7px;cursor:pointer}
+.scan-ghost svg{width:13px;height:13px}
+.scan-ghost:active{background:#f4efe6}
+.scan-note{margin:0;font-size:7px;color:#a5a099;letter-spacing:.2px;text-align:center}
+.scan-note.warn{color:#a8583f;font-weight:600}
+@keyframes scanLaser{0%,100%{top:11%}50%{top:87%}}
+
+/* ============================================================
+   Staff page — desktop responsiveness (mobile untouched)
+   Mobile: .staff-side-head/.staff-tips hidden, single column.
+   ============================================================ */
+.staff-side-head{display:none}
+.staff-tips{display:none}
+
+/* ---- Large phones / small tablets ---- */
+@media(min-width:768px){
+  .staff-header{height:76px;padding:0 28px}
+  .staff-content{max-width:640px;padding-top:46px}
+  .staff-intro h1{font-size:32px}
+  .staff-intro p{font-size:10px}
+  .manual-client{height:52px}
+  .manual-client input{font-size:10px}
+  .staff-status{font-size:10px}
+}
+
+/* ---- Desktop: two-column dashboard layout ---- */
+@media(min-width:1024px){
+  /* Shell & header */
+  .staff-page{background:linear-gradient(180deg,#efe9dd 0%,var(--ivory) 300px)}
+  .staff-header{height:82px;padding:0 max(28px,calc(50vw - 532px));box-shadow:0 6px 24px #17302f18}
+  .staff-header .logo{font-size:34px}
+  .staff-header>div{gap:1px}
+  .staff-header>div span{font-size:8px;letter-spacing:2px}
+  .staff-header>div b{font-size:17px}
+  .staff-header>button{width:40px;height:40px}
+  .staff-header>button svg{width:16px}
+
+  /* Content canvas */
+  .staff-content{max-width:1120px;padding:56px 32px 90px}
+  .staff-intro{gap:16px;margin-bottom:32px}
+  .staff-intro>span{width:58px;height:58px}
+  .staff-intro svg{width:24px}
+  .staff-intro h1{font-size:38px}
+  .staff-intro p{font-size:12px;margin-top:5px}
+
+  /* Two-column grid: scan square | side card */
+  .staff-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr);gap:34px;align-items:start}
+  .staff-grid-main .scanner-shell{max-width:560px;margin:0 auto}
+  .staff-grid-side{position:sticky;top:24px}
+
+  /* Side card (manual entry / billing) */
+  .staff-side-card{background:#fffdf8;border:1px solid #e4d9c2;border-radius:14px;padding:28px 26px;box-shadow:0 18px 44px #17302f0f}
+  .staff-side-head{display:block;margin-bottom:18px}
+  .staff-side-head>span{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--gold)}
+  .staff-side-head h2{font-family:var(--serif);font-size:26px;font-weight:500;margin:5px 0 6px;color:var(--deep)}
+  .staff-side-head p{font-size:11px;line-height:1.55;color:var(--muted);margin:0}
+  .manual-divider{display:none}
+  .manual-client{height:58px;border-radius:8px}
+  .manual-client input{font-size:12px;padding:0 16px}
+  .manual-client button{width:58px}
+  .manual-client button svg{width:20px}
+  .staff-tips{display:grid;gap:11px;list-style:none;margin:22px 0 0;padding:18px 2px 0;border-top:1px solid var(--line)}
+  .staff-tips li{display:flex;align-items:center;gap:9px;font-size:10px;color:#7c7a74}
+  .staff-tips svg{width:13px;height:13px;flex:0 0 13px;color:var(--gold)}
+  .staff-status{font-size:11px;padding:15px;gap:10px;border-radius:8px;margin-top:18px}
+  .staff-status svg{width:18px;flex:0 0 18px}
+
+  /* Scanning square scaling */
+  .scan-stage{border-radius:18px}
+  .scan-corner{width:54px;height:54px;border-width:4px}
+  .scan-corner.tl{top:18px;left:18px}
+  .scan-corner.tr{top:18px;right:18px}
+  .scan-corner.bl{bottom:18px;left:18px}
+  .scan-corner.br{bottom:18px;right:18px}
+  .scan-hint{font-size:9px;padding:9px 15px;bottom:16px}
+  .scan-hint svg{width:14px;height:14px;flex-basis:14px}
+  .scan-cover h3{font-size:25px}
+  .scan-cover p{font-size:11px;max-width:360px}
+  .scan-idle-icon{width:74px;height:74px;box-shadow:0 0 0 11px rgba(217,182,111,.09)}
+  .scan-idle-icon svg{width:36px;height:36px}
+  .scan-error-icon{width:64px;height:64px;box-shadow:0 0 0 11px rgba(238,140,131,.08)}
+  .scan-error-icon svg{width:30px;height:30px}
+  .scan-loader{width:48px;height:48px}
+  .scan-cover-warn{font-size:9px}
+  .scan-primary{min-height:52px;padding:0 28px;font-size:11px;letter-spacing:1.4px;border-radius:8px}
+  .scan-primary svg{width:17px;height:17px}
+  .scanner-actions{margin-top:16px;gap:10px}
+  .scan-ghost{min-height:46px;padding:0 22px;font-size:10px;border-radius:8px}
+  .scan-ghost svg{width:14px;height:14px}
+  .scan-note{font-size:9px}
+
+  /* Member (profile) view scaling */
+  .client-found{padding:42px 30px;border-radius:14px}
+  .client-avatar{width:84px;height:84px;font-size:38px}
+  .client-found>span{margin-top:18px;font-size:9px;letter-spacing:2.5px}
+  .client-found h1{font-size:42px;margin:8px}
+  .client-found>small{font-size:9px;letter-spacing:1.5px}
+  .staff-balance{margin-top:26px;padding-top:24px;gap:9px}
+  .staff-balance b{font-size:58px}
+  .staff-balance span{font-size:11px}
+  .staff-side-card .bill-form{margin-top:2px}
+  .bill-form>label{font-size:10px;margin-bottom:9px}
+  .bill-form>div{height:68px;padding:0 18px;border-radius:8px}
+  .bill-form>div svg{width:22px}
+  .bill-form input{font-size:28px}
+  .bill-form>div span{font-size:12px}
+  .bill-form p{font-size:11px;margin-top:10px}
+  .bill-form>button{height:58px;font-size:11px;letter-spacing:.8px;border-radius:8px;margin-top:2px}
+  .bill-form>button svg{width:18px}
+  .scan-another{height:52px;font-size:10px;letter-spacing:.6px;border-radius:8px;margin-top:14px}
+  .scan-another svg{width:16px}
+
+  /* PIN lock screen scaling */
+  .staff-login{width:min(100%,430px);padding:48px 34px;border-radius:16px}
+  .staff-login .logo{font-size:44px}
+  .staff-lock-icon{width:70px;height:70px}
+  .staff-login>span{font-size:8px}
+  .staff-login h1{font-size:42px}
+  .staff-login p{font-size:11px}
+  .staff-login input{height:64px;font-size:30px}
+  .staff-login form button{height:56px;font-size:11px;letter-spacing:1.4px}
+  .staff-login>small{font-size:10px}
+  .staff-back{top:26px;left:28px;font-size:10px}
+}
