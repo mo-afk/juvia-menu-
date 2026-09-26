@@ -609,10 +609,12 @@ function logoHTML() {
   return '<a class="logo" href="#top" aria-label="Juvia, retour en haut">juvia<span>.</span></a>';
 }
 
+var TEST_VIDEO_POSTER_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/Screenshot%202026-09-26%20at%2016.36.44.png';
+var TEST_VIDEO_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/%5B%40download_it_bot%201080p%5D%20Video%20by%20juvia%20oujda.mp4';
+
 function videoCardHTML(dish, index, catIndex) {
-  var src = index === 2 ? 'images/juvia-dessert.jpg' : 'images/juvia-food.jpg';
   return '<button class="video-card crop-' + index + '" data-dish-cat="' + catIndex + '" data-dish-name="' + esc(dish.n) + '" aria-label="Voir la vidéo de ' + esc(dish.n) + '">' +
-    '<img src="' + src + '" alt=""/>' +
+    '<video class="video-card-media" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop aria-hidden="true"></video>' +
     '<span class="video-play">' + ic('play', 15, 'fill="currentColor"') + '</span>' +
     '<span class="video-duration">0:' + (12 + index * 3) + '</span>' +
     '<b>' + esc(dish.n) + '</b>' +
@@ -760,8 +762,7 @@ function openVideoModal(dish) {
       '<button class="modal-bg" id="video-bg"></button>' +
       '<div class="modal-card">' +
         '<button class="modal-close" id="video-close">' + ic('x', 18) + '</button>' +
-        '<div class="modal-image"><img src="images/juvia-food.jpg" alt="' + esc(dish.n) + '"/>' +
-          '<span>' + ic('play', 24, 'fill="currentColor"') + '</span></div>' +
+        '<div class="modal-image"><video class="modal-video" src="' + TEST_VIDEO_URL + '" poster="' + TEST_VIDEO_POSTER_URL + '" preload="none" playsinline muted loop controls aria-label="Lire la vidéo de ' + esc(dish.n) + '"></video></div>' +
         '<span class="modal-kicker">Dans les coulisses</span>' +
         '<h2>' + esc(dish.n) + '</h2>' +
         '<p>' + esc(dish.d) + '</p>' +
