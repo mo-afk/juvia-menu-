@@ -610,7 +610,7 @@ function logoHTML() {
 }
 
 var TEST_VIDEO_POSTER_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/Screenshot%202026-09-26%20at%2016.36.44.png';
-var TEST_VIDEO_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/%5B%40download_it_bot%201080p%5D%20Video%20by%20juvia%20oujda.mp4';
+var TEST_VIDEO_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/video.webm';
 
 function videoCardHTML(dish, index, catIndex) {
   // The card is one native button, so every visible part of it keeps the
