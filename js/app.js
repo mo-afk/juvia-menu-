@@ -609,7 +609,7 @@ function logoHTML() {
   return '<a class="logo" href="#top" aria-label="Juvia, retour en haut">juvia<span>.</span></a>';
 }
 
-var TEST_VIDEO_POSTER_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/Screenshot%202026-09-26%20at%2016.36.44.png';
+var TEST_VIDEO_POSTER_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/poster.png';
 var TEST_VIDEO_URL = 'https://pub-b1a7fa82e58941ab8f7a5cd45961105f.r2.dev/video.webm';
 
 function videoCardHTML(dish, index, catIndex) {
